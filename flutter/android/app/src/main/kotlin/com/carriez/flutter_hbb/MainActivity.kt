@@ -14,11 +14,15 @@ import android.content.Context
 import android.content.Intent
 import android.content.ServiceConnection
 import android.content.ClipboardManager
+import android.provider.DocumentsContract
+import android.net.Uri
 import android.os.Bundle
 import android.os.Build
 import android.os.IBinder
 import android.util.Log
 import android.view.WindowManager
+import android.view.View
+import android.view.ViewGroup
 import android.media.MediaCodecInfo
 import android.media.MediaCodecInfo.CodecCapabilities.COLOR_FormatSurface
 import android.media.MediaCodecInfo.CodecCapabilities.COLOR_FormatYUV420SemiPlanar
@@ -98,6 +102,7 @@ class MainActivity : FlutterActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+
         if (_rdClipboardManager == null) {
             _rdClipboardManager = RdClipboardManager(getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager)
             FFI.setClipboardManager(_rdClipboardManager!!)
@@ -272,6 +277,29 @@ class MainActivity : FlutterActivity() {
                 }
                 "on_voice_call_closed" -> {
                     onVoiceCallClosed()
+                }
+                "open_folder" -> {
+                    if (call.arguments is String) {
+                        val path = call.arguments as String
+                        try {
+                            val relativePath = path.removePrefix("/storage/emulated/0/")
+                            val uri = DocumentsContract.buildDocumentUri(
+                                "com.android.externalstorage.documents",
+                                "primary:$relativePath"
+                            )
+                            val intent = Intent(Intent.ACTION_VIEW).apply {
+                                setData(uri)
+                                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                            }
+                            context.startActivity(intent)
+                            result.success(true)
+                        } catch (e: Exception) {
+                            Log.e(logTag, "Failed to open folder: $e")
+                            result.success(false)
+                        }
+                    } else {
+                        result.success(false)
+                    }
                 }
                 else -> {
                     result.error("-1", "No such method", null)

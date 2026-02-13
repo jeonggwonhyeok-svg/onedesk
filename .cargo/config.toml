@@ -12,5 +12,28 @@ rustflags = [
 #rustflags = [
 #    "-C", "link-args=-Wl,-Bstatic -lc -Wl,-Bdynamic"
 #]
+[target.aarch64-linux-android]
+linker = "C:/Users/rncpe/AppData/Local/Android/Sdk/ndk/27.2.12479018/toolchains/llvm/prebuilt/windows-x86_64/bin/aarch64-linux-android28-clang.cmd"
+rustflags = ["-L", "C:/tools/vcpkg/installed/arm64-android/lib"]
+
+[target.x86_64-linux-android]
+linker = "C:/Users/rncpe/AppData/Local/Android/Sdk/ndk/27.2.12479018/toolchains/llvm/prebuilt/windows-x86_64/bin/x86_64-linux-android28-clang.cmd"
+rustflags = ["-L", "C:/tools/vcpkg/installed/x64-android/lib"]
+
+[env]
+OPENSSL_STATIC = "1"
+OPENSSL_NO_VENDOR = "1"
+ANDROID_NDK_HOME = "C:/Users/rncpe/AppData/Local/Android/Sdk/ndk/27.2.12479018"
+
+# Android x86_64 (emulator) OpenSSL paths
+X86_64_LINUX_ANDROID_OPENSSL_DIR = "C:/tools/vcpkg/installed/x64-android"
+X86_64_LINUX_ANDROID_OPENSSL_LIB_DIR = "C:/tools/vcpkg/installed/x64-android/lib"
+X86_64_LINUX_ANDROID_OPENSSL_INCLUDE_DIR = "C:/tools/vcpkg/installed/x64-android/include"
+
+# Android aarch64 (real devices) OpenSSL paths
+AARCH64_LINUX_ANDROID_OPENSSL_DIR = "C:/tools/vcpkg/installed/arm64-android"
+AARCH64_LINUX_ANDROID_OPENSSL_LIB_DIR = "C:/tools/vcpkg/installed/arm64-android/lib"
+AARCH64_LINUX_ANDROID_OPENSSL_INCLUDE_DIR = "C:/tools/vcpkg/installed/arm64-android/include"
+
 [net]
 git-fetch-with-cli = true

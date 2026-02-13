@@ -90,16 +90,25 @@ void setPermanentPasswordDialog(OverlayDialogManager dialogManager) async {
       onCancel: close,
       onSubmit: (validateLength && validateSame) ? submit : null,
       actions: [
-        dialogButton(
-          'Cancel',
-          icon: Icon(Icons.close_rounded),
-          onPressed: close,
-          isOutline: true,
-        ),
-        dialogButton(
-          'OK',
-          icon: Icon(Icons.done_rounded),
-          onPressed: (validateLength && validateSame) ? submit : null,
+        Row(
+          children: [
+            Expanded(
+              child: dialogButton(
+                'Cancel',
+                icon: Icon(Icons.close_rounded),
+                onPressed: close,
+                isOutline: true,
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: dialogButton(
+                'OK',
+                icon: Icon(Icons.done_rounded),
+                onPressed: (validateLength && validateSame) ? submit : null,
+              ),
+            ),
+          ],
         ),
       ],
     );
@@ -283,20 +292,29 @@ void showServerSettingsWithValue(
         ),
       ),
       actions: [
-        dialogButton('Cancel', onPressed: () {
-          close();
-        }, isOutline: true),
-        dialogButton(
-          'OK',
-          onPressed: () async {
-            if (await submit()) {
-              close();
-              showToast(translate('Successful'));
-              upSetState?.call(() {});
-            } else {
-              showToast(translate('Failed'));
-            }
-          },
+        Row(
+          children: [
+            Expanded(
+              child: dialogButton('Cancel', onPressed: () {
+                close();
+              }, isOutline: true),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: dialogButton(
+                'OK',
+                onPressed: () async {
+                  if (await submit()) {
+                    close();
+                    showToast(translate('Successful'));
+                    upSetState?.call(() {});
+                  } else {
+                    showToast(translate('Failed'));
+                  }
+                },
+              ),
+            ),
+          ],
         ),
       ],
     );

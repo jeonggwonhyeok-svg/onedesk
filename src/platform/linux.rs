@@ -63,7 +63,7 @@ lazy_static::lazy_static! {
             log::warn!("Not running as root, SUDO_E_PRESERVES_ENV check skipped");
             false
         } else {
-            let key = format!("__RUSTDESK_SUDO_E_TEST_{}", std::process::id());
+            let key = format!("__ONEDESK_SUDO_E_TEST_{}", std::process::id());
             let val = "1";
             let expected = format!("{key}={val}");
             Command::new("sudo")
@@ -433,7 +433,7 @@ fn set_x11_env(desktop: &Desktop) {
 }
 
 #[inline]
-fn stop_rustdesk_servers() {
+fn stop_onedesk_servers() {
     let _ = run_cmds(&format!(
         r##"ps -ef | grep -E '{} +--server' | awk '{{print $2}}' | xargs -r kill -9"##,
         crate::get_app_name().to_lowercase(),
@@ -521,15 +521,15 @@ fn should_start_server(
 }
 
 // to-do: stop_server(&mut user_server); may not stop child correctly
-// stop_rustdesk_servers() is just a temp solution here.
+// stop_onedesk_servers() is just a temp solution here.
 fn force_stop_server() {
-    stop_rustdesk_servers();
+    stop_onedesk_servers();
     sleep_millis(super::SERVICE_INTERVAL);
 }
 
 pub fn start_os_service() {
     check_if_stop_service();
-    stop_rustdesk_servers();
+    stop_onedesk_servers();
     stop_subprocess();
     start_uinput_service();
 
@@ -1347,7 +1347,7 @@ mod desktop {
         pub xauth: String,
         pub home: String,
         pub dbus: String,
-        pub is_rustdesk_subprocess: bool,
+        pub is_onedesk_subprocess: bool,
         pub wl_display: String,
     }
 
@@ -1364,7 +1364,7 @@ mod desktop {
 
         #[inline]
         pub fn is_headless(&self) -> bool {
-            self.sid.is_empty() || self.is_rustdesk_subprocess
+            self.sid.is_empty() || self.is_onedesk_subprocess
         }
 
         fn get_display_xauth_wayland(&mut self) {
@@ -1605,14 +1605,14 @@ mod desktop {
         }
 
         fn set_is_subprocess(&mut self) {
-            self.is_rustdesk_subprocess = false;
+            self.is_onedesk_subprocess = false;
             let cmd = format!(
                 "ps -ef | grep '{}/xorg.conf' | grep -v grep | wc -l",
                 crate::get_app_name().to_lowercase()
             );
             if let Ok(res) = run_cmds(&cmd) {
                 if res.trim() != "0" {
-                    self.is_rustdesk_subprocess = true;
+                    self.is_onedesk_subprocess = true;
                 }
             }
         }
@@ -1622,7 +1622,7 @@ mod desktop {
                 // Xwayland display and xauth may not be available in a short time after login.
                 if is_xwayland_running() && !self.is_login_wayland() {
                     self.get_display_xauth_xwayland();
-                    self.is_rustdesk_subprocess = false;
+                    self.is_onedesk_subprocess = false;
                 } else if self.is_wayland() {
                     self.get_display_xauth_wayland();
                 }
@@ -1632,7 +1632,7 @@ mod desktop {
             let seat0_values = get_values_of_seat0_with_gdm_wayland(&[0, 1, 2]);
             if seat0_values[0].is_empty() {
                 *self = Self::default();
-                self.is_rustdesk_subprocess = false;
+                self.is_onedesk_subprocess = false;
                 return;
             }
 
@@ -1643,7 +1643,7 @@ mod desktop {
             if self.is_login_wayland() {
                 self.display = "".to_owned();
                 self.xauth = "".to_owned();
-                self.is_rustdesk_subprocess = false;
+                self.is_onedesk_subprocess = false;
                 return;
             }
 
@@ -1654,7 +1654,7 @@ mod desktop {
                 } else {
                     self.get_display_xauth_wayland();
                 }
-                self.is_rustdesk_subprocess = false;
+                self.is_onedesk_subprocess = false;
             } else {
                 self.get_display_x11();
                 self.get_xauth_x11();
@@ -1747,7 +1747,7 @@ pub fn uninstall_service(show_new_window: bool, _: bool) -> bool {
     log::info!("Uninstalling service...");
     let cp = switch_service(true);
     let app_name = crate::get_app_name().to_lowercase();
-    // systemctl kill rustdesk --tray, execute cp first
+    // systemctl kill onedesk --tray, execute cp first
     if !run_cmds_privileged(&format!(
         "{cp} systemctl disable {app_name}; systemctl stop {app_name};"
     )) {

@@ -14,9 +14,11 @@ import 'package:flutter_keyboard_visibility/flutter_keyboard_visibility.dart';
 import 'package:flutter_svg/svg.dart';
 import 'package:get/get.dart';
 import 'package:provider/provider.dart';
+import 'package:uuid/uuid.dart';
 import 'package:wakelock_plus/wakelock_plus.dart';
 
 import '../../common.dart';
+import '../../common/widgets/cm_custom_toggle.dart';
 import '../../common/widgets/overlay.dart';
 import '../../common/widgets/dialog.dart';
 import '../../common/widgets/remote_input.dart';
@@ -25,7 +27,8 @@ import '../../models/model.dart';
 import '../../models/platform_model.dart';
 import '../../utils/image.dart';
 import '../widgets/dialog.dart';
-import '../widgets/custom_scale_widget.dart';
+import '../widgets/toolbar_overlay.dart';
+import 'file_manager_page.dart';
 
 final initText = '1' * 1024;
 
@@ -62,7 +65,7 @@ class RemotePage extends StatefulWidget {
 
 class _RemotePageState extends State<RemotePage> with WidgetsBindingObserver {
   Timer? _timer;
-  bool _showBar = !isWebDesktop;
+  final _showBar = (!isWebDesktop).obs;
   bool _showGestureHelp = false;
   String _value = '';
   Orientation? _currentOrientation;
@@ -77,6 +80,20 @@ class _RemotePageState extends State<RemotePage> with WidgetsBindingObserver {
   final FocusNode _mobileFocusNode = FocusNode();
   final FocusNode _physicalFocusNode = FocusNode();
   var _showEdit = false; // use soft keyboard
+
+  // Voice call state
+  final _voiceCallMicOn = true.obs;
+  final _voiceCallSoundOn = true.obs;
+  String _savedVoiceCallMicDevice = '';
+
+  // Recording state
+  Timer? _recordingTimer;
+  final _recordingSeconds = 0.obs;
+  final _recordingPaused = false.obs;
+  final _recordingSound = true.obs;
+
+  // Fullscreen (view style) state
+  final _isOriginalViewStyle = false.obs;
 
   InputModel get inputModel => gFFI.inputModel;
   SessionID get sessionId => gFFI.sessionId;
@@ -116,6 +133,10 @@ class _RemotePageState extends State<RemotePage> with WidgetsBindingObserver {
     gFFI.chatModel
         .changeCurrentKey(MessageKey(widget.id, ChatModel.clientModeID));
     _blockableOverlayState.applyFfi(gFFI);
+    // Voice call status listener
+    gFFI.chatModel.voiceCallStatus.listen(_onVoiceCallStatusChanged);
+    // Recording model listener
+    gFFI.recordingModel.addListener(_onRecordingChanged);
     gFFI.imageModel.addCallbackOnFirstImage((String peerId) {
       gFFI.recordingModel
           .updateStatus(bind.sessionGetIsRecording(sessionId: gFFI.sessionId));
@@ -124,6 +145,7 @@ class _RemotePageState extends State<RemotePage> with WidgetsBindingObserver {
       }
       _disableAndroidSoftKeyboard(
           isKeyboardVisible: keyboardVisibilityController.isVisible);
+      _initViewStyleState();
     });
     WidgetsBinding.instance.addObserver(this);
   }
@@ -143,6 +165,8 @@ class _RemotePageState extends State<RemotePage> with WidgetsBindingObserver {
     await gFFI.close();
     _timer?.cancel();
     _timerDidChangeMetrics?.cancel();
+    _recordingTimer?.cancel();
+    gFFI.recordingModel.removeListener(_onRecordingChanged);
     gFFI.dialogManager.dismissAll();
     await SystemChrome.setEnabledSystemUIMode(SystemUiMode.manual,
         overlays: SystemUiOverlay.values);
@@ -221,6 +245,145 @@ class _RemotePageState extends State<RemotePage> with WidgetsBindingObserver {
     }
     // update for Scaffold
     setState(() {});
+  }
+
+  void _onVoiceCallStatusChanged(VoiceCallStatus status) async {
+    if (status == VoiceCallStatus.connected ||
+        status == VoiceCallStatus.waitingForResponse) {
+      _savedVoiceCallMicDevice =
+          await bind.getVoiceCallInputDevice(isCm: false);
+      if (_savedVoiceCallMicDevice.isEmpty) {
+        final devices = (await bind.mainGetSoundInputs()).toList();
+        if (devices.isNotEmpty) {
+          _savedVoiceCallMicDevice = devices.first;
+        }
+      }
+      _voiceCallMicOn.value = true;
+      _voiceCallSoundOn.value = true;
+    }
+  }
+
+  void _toggleVoiceCallMic() async {
+    _voiceCallMicOn.value = !_voiceCallMicOn.value;
+    if (_voiceCallMicOn.value) {
+      await bind.setVoiceCallInputDevice(
+          isCm: false, device: _savedVoiceCallMicDevice);
+    } else {
+      await bind.setVoiceCallInputDevice(isCm: false, device: '');
+    }
+  }
+
+  void _toggleVoiceCallSound() {
+    _voiceCallSoundOn.value = !_voiceCallSoundOn.value;
+    bind.sessionToggleOption(
+      sessionId: sessionId,
+      value: 'disable-audio',
+    );
+  }
+
+  void _endVoiceCall() {
+    bind.sessionCloseVoiceCall(sessionId: sessionId);
+  }
+
+  void _startVoiceCall() async {
+    if (isAndroid) {
+      final hasPermission =
+          await AndroidPermissionManager.check("android.permission.RECORD_AUDIO");
+      if (!hasPermission) {
+        final granted =
+            await AndroidPermissionManager.request("android.permission.RECORD_AUDIO");
+        if (!granted) {
+          showToast('마이크 권한이 필요합니다.');
+          return;
+        }
+      }
+    }
+    bind.sessionRequestVoiceCall(sessionId: sessionId);
+  }
+
+  // ===== Recording =====
+
+  void _onRecordingChanged() {
+    final isRecording = gFFI.recordingModel.start;
+    if (isRecording && _recordingTimer == null) {
+      _startRecordingTimer();
+    } else if (!isRecording && _recordingTimer != null) {
+      _stopRecordingTimer();
+    }
+    // UI updates handled by ListenableBuilder + Obx in toolbar overlay
+  }
+
+  void _startRecordingTimer() {
+    _recordingSeconds.value = 0;
+    _recordingPaused.value = false;
+    _recordingTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
+      if (!_recordingPaused.value) {
+        _recordingSeconds.value++;
+      }
+    });
+  }
+
+  void _stopRecordingTimer() {
+    _recordingTimer?.cancel();
+    _recordingTimer = null;
+    _recordingSeconds.value = 0;
+  }
+
+  String _formatRecordingTime(int seconds) {
+    final h = (seconds ~/ 3600).toString().padLeft(2, '0');
+    final m = ((seconds % 3600) ~/ 60).toString().padLeft(2, '0');
+    final s = (seconds % 60).toString().padLeft(2, '0');
+    return '$h:$m:$s';
+  }
+
+  void _stopRecording() {
+    gFFI.recordingModel.toggle();
+  }
+
+  void _toggleRecordingPause() {
+    _recordingPaused.value = !_recordingPaused.value;
+  }
+
+  void _toggleRecordingSound() {
+    _recordingSound.value = !_recordingSound.value;
+  }
+
+  // ===== View Mode (view-only toggle) =====
+
+  void _toggleViewMode() async {
+    await bind.sessionToggleOption(
+      sessionId: sessionId,
+      value: kOptionToggleViewOnly,
+    );
+    final viewOnly = await bind.sessionGetToggleOption(
+      sessionId: sessionId,
+      arg: kOptionToggleViewOnly,
+    );
+    gFFI.ffiModel.setViewOnly(
+        widget.id, viewOnly ?? !gFFI.ffiModel.viewOnly);
+  }
+
+  // ===== Fullscreen (view style toggle) =====
+
+  Future<void> _initViewStyleState() async {
+    final current =
+        await bind.sessionGetViewStyle(sessionId: sessionId) ?? '';
+    _isOriginalViewStyle.value = (current == kRemoteViewStyleOriginal);
+  }
+
+  Future<void> _toggleViewStyleFullscreen() async {
+    final current =
+        await bind.sessionGetViewStyle(sessionId: sessionId) ?? '';
+    if (current == kRemoteViewStyleOriginal) {
+      await bind.sessionSetViewStyle(
+          sessionId: sessionId, value: kRemoteViewStyleAdaptive);
+      _isOriginalViewStyle.value = false;
+    } else {
+      await bind.sessionSetViewStyle(
+          sessionId: sessionId, value: kRemoteViewStyleOriginal);
+      _isOriginalViewStyle.value = true;
+    }
+    gFFI.canvasModel.updateViewStyle();
   }
 
   void _handleIOSSoftKeyboardInput(String newValue) {
@@ -354,15 +517,13 @@ class _RemotePageState extends State<RemotePage> with WidgetsBindingObserver {
 
   Widget _bottomWidget() => _showGestureHelp
       ? getGestureHelp()
-      : (_showBar && gFFI.ffiModel.pi.displays.isNotEmpty
-          ? getBottomAppBar()
-          : Offstage());
+      : Offstage();
 
   @override
   Widget build(BuildContext context) {
     final keyboardIsVisible =
         keyboardVisibilityController.isVisible && _showEdit;
-    final showActionButton = !_showBar || keyboardIsVisible || _showGestureHelp;
+    final showDismissFab = keyboardIsVisible || _showGestureHelp;
 
     return WillPopScope(
       onWillPop: () async {
@@ -374,16 +535,11 @@ class _RemotePageState extends State<RemotePage> with WidgetsBindingObserver {
           floatingActionButtonLocation: keyboardIsVisible
               ? FABLocation(FloatingActionButtonLocation.endFloat, 0, -35)
               : null,
-          floatingActionButton: !showActionButton
+          floatingActionButton: !showDismissFab
               ? null
               : FloatingActionButton(
                   mini: !keyboardIsVisible,
-                  child: Icon(
-                    (keyboardIsVisible || _showGestureHelp)
-                        ? Icons.expand_more
-                        : Icons.expand_less,
-                    color: Colors.white,
-                  ),
+                  child: Icon(Icons.expand_more, color: Colors.white),
                   backgroundColor: MyTheme.accent,
                   onPressed: () {
                     setState(() {
@@ -394,8 +550,6 @@ class _RemotePageState extends State<RemotePage> with WidgetsBindingObserver {
                         _physicalFocusNode.requestFocus();
                       } else if (_showGestureHelp) {
                         _showGestureHelp = false;
-                      } else {
-                        _showBar = !_showBar;
                       }
                     });
                   }),
@@ -415,41 +569,63 @@ class _RemotePageState extends State<RemotePage> with WidgetsBindingObserver {
                       : Offstage(),
                 ],
               )),
-          body: Obx(
-            () => getRawPointerAndKeyBody(Overlay(
-              initialEntries: [
-                OverlayEntry(builder: (context) {
-                  return Container(
-                    color: kColorCanvas,
-                    child: isWebDesktop
-                        ? getBodyForDesktopWithListener()
-                        : SafeArea(
-                            child:
-                                OrientationBuilder(builder: (ctx, orientation) {
-                              if (_currentOrientation != orientation) {
-                                Timer(const Duration(milliseconds: 200), () {
-                                  gFFI.dialogManager
-                                      .resetMobileActionsOverlay(ffi: gFFI);
-                                  _currentOrientation = orientation;
-                                  gFFI.canvasModel.updateViewStyle();
-                                });
-                              }
-                              return Container(
-                                color: MyTheme.canvasColor,
-                                child: inputModel.isPhysicalMouse.value
-                                    ? getBodyForMobile()
-                                    : RawTouchGestureDetectorRegion(
-                                        child: getBodyForMobile(),
-                                        ffi: gFFI,
-                                      ),
-                              );
-                            }),
-                          ),
-                  );
-                })
-              ],
-            )),
-          )),
+          body: Obx(() {
+            // Access Rx values here so Obx reacts to their changes
+            final isPhysicalMouse = inputModel.isPhysicalMouse.value;
+            final showToolbar = gFFI.ffiModel.pi.isSet.isTrue &&
+                gFFI.ffiModel.waitForFirstImage.isFalse &&
+                gFFI.ffiModel.pi.displays.isNotEmpty &&
+                !_showGestureHelp;
+            final isPortrait = MediaQuery.of(context).orientation == Orientation.portrait;
+            final kbVisible = keyboardVisibilityController.isVisible && _showEdit;
+
+            return getRawPointerAndKeyBody(
+              Stack(
+                children: [
+                  // Canvas (same rendering path as working c25b54b)
+                  Overlay(
+                    initialEntries: [
+                      OverlayEntry(builder: (context) {
+                        return Container(
+                          color: kColorCanvas,
+                          child: isWebDesktop
+                              ? getBodyForDesktopWithListener()
+                              : SafeArea(
+                                  child:
+                                      OrientationBuilder(builder: (ctx, orientation) {
+                                    if (_currentOrientation != orientation) {
+                                      Timer(const Duration(milliseconds: 200), () {
+                                        gFFI.dialogManager
+                                            .resetMobileActionsOverlay(ffi: gFFI);
+                                        _currentOrientation = orientation;
+                                        gFFI.canvasModel.updateViewStyle();
+                                      });
+                                    }
+                                    return Container(
+                                      color: MyTheme.canvasColor,
+                                      child: isPhysicalMouse
+                                          ? getBodyForMobile()
+                                          : RawTouchGestureDetectorRegion(
+                                              child: getBodyForMobile(),
+                                              ffi: gFFI,
+                                            ),
+                                    );
+                                  }),
+                                ),
+                        );
+                      })
+                    ],
+                  ),
+                  // Toolbar overlay (Positioned - direct Stack child)
+                  if (showToolbar && _showBar.value)
+                    _buildToolbarOverlay(isPortrait),
+                  // Mini button (Positioned - direct Stack child)
+                  if (showToolbar && !_showBar.value && !kbVisible)
+                    _buildMiniButton(isPortrait),
+                ],
+              ),
+            );
+          })),
     );
   }
 
@@ -469,103 +645,376 @@ class _RemotePageState extends State<RemotePage> with WidgetsBindingObserver {
     );
   }
 
-  Widget getBottomAppBar() {
-    final ffiModel = Provider.of<FfiModel>(context);
-    return BottomAppBar(
-      elevation: 10,
-      color: MyTheme.accent,
-      child: Row(
-        mainAxisSize: MainAxisSize.max,
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-        children: <Widget>[
-          Row(
-              children: <Widget>[
-                    IconButton(
-                      color: Colors.white,
-                      icon: Icon(Icons.clear),
-                      onPressed: () {
-                        clientClose(sessionId, gFFI);
-                      },
-                    ),
-                    IconButton(
-                      color: Colors.white,
-                      icon: Icon(Icons.tv),
-                      onPressed: () {
-                        setState(() => _showEdit = false);
-                        showOptions(context, widget.id, gFFI.dialogManager);
-                      },
-                    )
-                  ] +
-                  (isWebDesktop || ffiModel.viewOnly || !ffiModel.keyboard
-                      ? []
-                      : gFFI.ffiModel.isPeerAndroid
-                          ? [
-                              IconButton(
-                                  color: Colors.white,
-                                  icon: Icon(Icons.keyboard),
-                                  onPressed: openKeyboard),
-                              IconButton(
-                                color: Colors.white,
-                                icon: const Icon(Icons.build),
-                                onPressed: () => gFFI.dialogManager
-                                    .toggleMobileActionsOverlay(ffi: gFFI),
-                              )
-                            ]
-                          : [
-                              IconButton(
-                                  color: Colors.white,
-                                  icon: Icon(Icons.keyboard),
-                                  onPressed: openKeyboard),
-                              IconButton(
-                                color: Colors.white,
-                                icon: Icon(gFFI.ffiModel.touchMode
-                                    ? Icons.touch_app
-                                    : Icons.mouse),
-                                onPressed: () => setState(
-                                    () => _showGestureHelp = !_showGestureHelp),
-                              ),
-                            ]) +
-                  (isWeb
-                      ? []
-                      : <Widget>[
-                          futureBuilder(
-                              future: gFFI.invokeMethod(
-                                  "get_value", "KEY_IS_SUPPORT_VOICE_CALL"),
-                              hasData: (isSupportVoiceCall) => IconButton(
-                                    color: Colors.white,
-                                    icon: isAndroid && isSupportVoiceCall
-                                        ? SvgPicture.asset('assets/chat.svg',
-                                            colorFilter: ColorFilter.mode(
-                                                Colors.white, BlendMode.srcIn))
-                                        : Icon(Icons.message),
-                                    onPressed: () =>
-                                        isAndroid && isSupportVoiceCall
-                                            ? showChatOptions(widget.id)
-                                            : onPressedTextChat(widget.id),
-                                  ))
-                        ]) +
-                  [
-                    IconButton(
-                      color: Colors.white,
-                      icon: Icon(Icons.more_vert),
-                      onPressed: () {
-                        setState(() => _showEdit = false);
-                        showActions(widget.id);
-                      },
-                    ),
-                  ]),
-          Obx(() => IconButton(
-                color: Colors.white,
-                icon: Icon(Icons.expand_more),
-                onPressed: gFFI.ffiModel.waitForFirstImage.isTrue
-                    ? null
-                    : () {
-                        setState(() => _showBar = !_showBar);
-                      },
-              )),
-        ],
+  // ===== New Overlay Toolbar =====
+
+  Widget _buildToolbarOverlay(bool isPortrait) {
+    // Use ListenableBuilder to react to recordingModel changes
+    return Positioned(
+      left: 0,
+      right: 0,
+      top: isPortrait ? 8 : null,
+      bottom: isPortrait ? null : 8,
+      child: Center(
+        child: ListenableBuilder(
+          listenable: gFFI.recordingModel,
+          builder: (context, child) {
+            return Obx(() => _buildToolbarContent(isPortrait));
+          },
+        ),
       ),
     );
+  }
+
+  Widget _buildToolbarContent(bool isPortrait) {
+    final ffiModel = Provider.of<FfiModel>(context);
+    final voiceCallStatus = gFFI.chatModel.voiceCallStatus.value;
+    final isInVoiceCall = voiceCallStatus == VoiceCallStatus.connected;
+    final isWaitingVoiceCall =
+        voiceCallStatus == VoiceCallStatus.waitingForResponse;
+    final isRecording = gFFI.recordingModel.start;
+
+    // File transfer popup items
+    final fileItems = <SimpleMenuItem>[
+      SimpleMenuItem('File Transfer', () => _openFileTransfer()),
+    ];
+
+    // Recording/Screenshot popup items
+    final recordItems = <SimpleMenuItem>[
+      SimpleMenuItem('Record Screen', () => _toggleRecording()),
+      SimpleMenuItem('Screenshot', () => _takeScreenshot()),
+    ];
+
+    // Communication popup items
+    final commItems = <SimpleMenuItem>[
+      SimpleMenuItem('Chat', () => onPressedTextChat(widget.id)),
+      if (!isWeb)
+        SimpleMenuItem(
+          (isInVoiceCall || isWaitingVoiceCall)
+              ? 'End Voice Call'
+              : 'Voice Call',
+          () => (isInVoiceCall || isWaitingVoiceCall)
+              ? _endVoiceCall()
+              : _startVoiceCall(),
+        ),
+      SimpleMenuItem(
+        ffiModel.viewOnly ? 'Control Mode' : 'View Mode',
+        () => _toggleViewMode(),
+      ),
+    ];
+
+    // More menu items (desktop-style)
+    final moreItems = <SimpleMenuItem>[
+      SimpleMenuItem('Display Settings', () {
+        setState(() => _showEdit = false);
+        showOptions(context, widget.id, gFFI.dialogManager);
+      }),
+      if (gFFI.ffiModel.isPeerAndroid)
+        SimpleMenuItem('Mobile Actions', () {
+          gFFI.dialogManager.toggleMobileActionsOverlay(ffi: gFFI);
+        }),
+      SimpleMenuItem('Restart Remote', () {
+        showRestartRemoteDevice(
+          gFFI.ffiModel.pi,
+          widget.id,
+          sessionId,
+          gFFI.dialogManager,
+        );
+      }),
+      SimpleMenuItem(
+        'Shutdown Remote',
+        () => _shutdownRemote(),
+        assetPath: 'assets/icons/remote-connection-end.svg',
+        iconColor: const Color(0xFFFE3E3E),
+      ),
+    ];
+
+    // Left group: file, record, comm, keyboard, mouse, more
+    final leftButtons = <Widget>[
+      // File transfer (popup)
+      toolbarPopupButton(
+        asset: 'assets/icons/remote_file.svg',
+        label: 'File Transfer',
+        items: fileItems,
+        isPortrait: isPortrait,
+      ),
+      // Recording/Screenshot (popup)
+      toolbarPopupButton(
+        asset: 'assets/icons/remote_screen.svg',
+        label: 'Recording',
+        items: recordItems,
+        isPortrait: isPortrait,
+      ),
+      // Communication (popup)
+      toolbarPopupButton(
+        asset: 'assets/icons/remote_group.svg',
+        label: 'Communication',
+        items: commItems,
+        isPortrait: isPortrait,
+      ),
+      // Keyboard (popup)
+      if (!isWebDesktop && !ffiModel.viewOnly && ffiModel.keyboard)
+        toolbarPopupButton(
+          asset: 'assets/icons/remote-keyboard.svg',
+          label: 'Keyboard Setting',
+          items: [
+            SimpleMenuItem('Open Keyboard', () => openKeyboard()),
+          ],
+          isPortrait: isPortrait,
+        ),
+      // Mouse/Touch mode (popup)
+      if (!isWebDesktop &&
+          !ffiModel.viewOnly &&
+          ffiModel.keyboard &&
+          !gFFI.ffiModel.isPeerAndroid)
+        toolbarPopupButton(
+          asset: 'assets/icons/remote-mouse.svg',
+          label: 'Mouse Setting',
+          items: [
+            SimpleMenuItem('Mouse mode', () {
+              if (gFFI.ffiModel.touchMode) {
+                gFFI.ffiModel.toggleTouchMode();
+                bind.mainSetLocalOption(key: kOptionTouchMode, value: 'N');
+              }
+            }),
+            SimpleMenuItem('Touch mode', () {
+              if (!gFFI.ffiModel.touchMode) {
+                gFFI.ffiModel.toggleTouchMode();
+                bind.mainSetLocalOption(key: kOptionTouchMode, value: 'Y');
+              }
+            }),
+          ],
+          isPortrait: isPortrait,
+        ),
+      // More (desktop-style popup)
+      toolbarPopupButton(
+        asset: 'assets/icons/remote_more.svg',
+        label: 'More',
+        items: moreItems,
+        isPortrait: isPortrait,
+      ),
+    ];
+
+    // Right group: fullscreen toggle, fold
+    final rightButtons = <Widget>[
+      Obx(() => toolbarIconButton(
+            asset: _isOriginalViewStyle.value
+                ? 'assets/icons/remote_full_restore.svg'
+                : 'assets/icons/remote_full.svg',
+            onPressed: _toggleViewStyleFullscreen,
+            isPressed: _isOriginalViewStyle.value,
+          )),
+      toolbarIconButton(
+        asset: 'assets/icons/remote-fold.svg',
+        onPressed: () => _showBar.value = false,
+      ),
+    ];
+
+    // Voice call controls (second row)
+    List<Widget> voiceCallButtons = [];
+    if (isInVoiceCall) {
+      voiceCallButtons = [
+        toolbarIconButton(
+          asset: 'assets/icons/remote_voice_call_off.svg',
+          bgColor: const Color(0xFFFE3E3E),
+          iconColor: Colors.white,
+          onPressed: _endVoiceCall,
+        ),
+        Obx(() => toolbarIconButton(
+              asset: _voiceCallMicOn.value
+                  ? 'assets/icons/remote_mic.svg'
+                  : 'assets/icons/remote_mic_off.svg',
+              onPressed: _toggleVoiceCallMic,
+            )),
+        Obx(() => toolbarIconButton(
+              asset: _voiceCallSoundOn.value
+                  ? 'assets/icons/remote_sound.svg'
+                  : 'assets/icons/remote_sound_off.svg',
+              onPressed: _toggleVoiceCallSound,
+            )),
+      ];
+    } else if (isWaitingVoiceCall) {
+      voiceCallButtons = [
+        toolbarIconButton(
+          asset: 'assets/call_wait.svg',
+          bgColor: const Color(0xFFF59E0B),
+          iconColor: Colors.white,
+          onPressed: _endVoiceCall,
+        ),
+      ];
+    }
+
+    if (!isPortrait) {
+      // Landscape: separate cards in a single row at bottom
+      return Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          // Main toolbar card
+          toolbarCard(
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                ...leftButtons,
+                toolbarSeparator(),
+                ...rightButtons,
+              ],
+            ),
+          ),
+          // Recording card
+          if (isRecording) ...[
+            const SizedBox(width: 6),
+            _buildRecordingBox(),
+          ],
+          // Voice call card
+          if (voiceCallButtons.isNotEmpty) ...[
+            const SizedBox(width: 6),
+            toolbarCard(
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: voiceCallButtons,
+              ),
+            ),
+          ],
+        ],
+      );
+    }
+
+    // Portrait: multi-row at top
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        // Main toolbar row
+        toolbarCard(
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              ...leftButtons,
+              toolbarSeparator(),
+              ...rightButtons,
+            ],
+          ),
+        ),
+        // Recording box (when recording)
+        if (isRecording) ...[
+          const SizedBox(height: 6),
+          _buildRecordingBox(),
+        ],
+        // Voice call row (if active)
+        if (voiceCallButtons.isNotEmpty) ...[
+          const SizedBox(height: 6),
+          toolbarCard(
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: voiceCallButtons,
+            ),
+          ),
+        ],
+      ],
+    );
+  }
+
+  /// Recording control box (desktop-style)
+  Widget _buildRecordingBox() {
+    return toolbarCard(
+      child: Obx(() => Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              // Stop
+              toolbarIconButton(
+                asset: 'assets/icons/remote-record-stop.svg',
+                onPressed: _stopRecording,
+              ),
+              // Pause/Resume
+              toolbarIconButton(
+                asset: _recordingPaused.value
+                    ? 'assets/icons/remote-record-start.svg'
+                    : 'assets/icons/remote-record-pause.svg',
+                onPressed: _toggleRecordingPause,
+              ),
+              // System sound toggle
+              toolbarIconButton(
+                asset: _recordingSound.value
+                    ? 'assets/icons/remote-record-sound-off.svg'
+                    : 'assets/icons/remote-record-sound.svg',
+                onPressed: _toggleRecordingSound,
+              ),
+              const SizedBox(width: 4),
+              // Timer
+              Text(
+                _formatRecordingTime(_recordingSeconds.value),
+                style: const TextStyle(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w500,
+                  color: Color(0xFF5F71FF),
+                ),
+              ),
+              const SizedBox(width: 8),
+            ],
+          )),
+    );
+  }
+
+  Widget _buildMiniButton(bool isPortrait) {
+    return Positioned(
+      left: 0,
+      top: isPortrait ? 8 : null,
+      bottom: isPortrait ? null : 8,
+      child: miniShowButton(onTap: () => _showBar.value = true),
+    );
+  }
+
+  void _openFileTransfer() {
+    final connToken = bind.sessionGetConnToken(sessionId: gFFI.sessionId);
+    final fileFFI = FFI(Uuid().v4obj());
+    fileFFI.start(widget.id, isFileTransfer: true, connToken: connToken);
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (BuildContext context) => FileManagerPage(
+            id: widget.id,
+            ffi: fileFFI),
+      ),
+    );
+  }
+
+  void _toggleRecording() {
+    gFFI.recordingModel.toggle();
+  }
+
+  void _takeScreenshot() {
+    bind.sessionTakeScreenshot(
+        sessionId: sessionId, display: gFFI.ffiModel.pi.currentDisplay);
+  }
+
+  void _shutdownRemote() {
+    gFFI.dialogManager.show((setState, close, context) {
+      return CustomAlertDialog(
+        title: Text(
+          translate('Shutdown Remote'),
+          style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+        ),
+        content: Text(
+          translate('Would you like to study remotely?'),
+          style: const TextStyle(fontSize: 14),
+        ),
+        actions: [
+          Row(
+            children: [
+              Expanded(
+                child: dialogButton('Cancel',
+                    onPressed: close, isOutline: true),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: dialogButton('OK', onPressed: () {
+                  close();
+                  closeConnection();
+                }),
+              ),
+            ],
+          ),
+        ],
+      );
+    });
   }
 
   bool get showCursorPaint =>
@@ -1129,216 +1578,625 @@ class CursorPaint extends StatelessWidget {
 }
 
 void showOptions(
-    BuildContext context, String id, OverlayDialogManager dialogManager) async {
-  var displays = <Widget>[];
-  final pi = gFFI.ffiModel.pi;
-  final image = gFFI.ffiModel.getConnectionImageText();
-  if (image != null) {
-    displays.add(Padding(padding: const EdgeInsets.only(top: 8), child: image));
-  }
-  if (pi.displays.length > 1 && pi.currentDisplay != kAllDisplayValue) {
-    final cur = pi.currentDisplay;
-    final children = <Widget>[];
-    final isDarkTheme = MyTheme.currentThemeMode() == ThemeMode.dark;
-    final numColorSelected = Colors.white;
-    final numColorUnselected = isDarkTheme ? Colors.grey : Colors.black87;
-    // We can't use `Theme.of(context).primaryColor` here, the color is:
-    // - light theme: 0xff2196f3 (Colors.blue)
-    // - dark theme: 0xff212121 (the canvas color?)
-    final numBgSelected =
-        Theme.of(context).colorScheme.primary.withOpacity(0.6);
-    for (var i = 0; i < pi.displays.length; ++i) {
-      children.add(InkWell(
-          onTap: () {
-            if (i == cur) return;
-            openMonitorInTheSameTab(i, gFFI, pi);
-            gFFI.dialogManager.dismissAll();
-          },
-          child: Ink(
-              width: 40,
-              height: 40,
-              decoration: BoxDecoration(
-                  border: Border.all(color: Theme.of(context).hintColor),
-                  borderRadius: BorderRadius.circular(2),
-                  color: i == cur ? numBgSelected : null),
-              child: Center(
-                  child: Text((i + 1).toString(),
-                      style: TextStyle(
-                          color:
-                              i == cur ? numColorSelected : numColorUnselected,
-                          fontWeight: FontWeight.bold))))));
-    }
-    displays.add(Padding(
-        padding: const EdgeInsets.only(top: 8),
-        child: Wrap(
-          alignment: WrapAlignment.center,
-          spacing: 8,
-          children: children,
-        )));
-  }
-  if (displays.isNotEmpty) {
-    displays.add(const Divider(color: MyTheme.border));
+    BuildContext context, String id, OverlayDialogManager dialogManager) {
+  Navigator.push(
+    context,
+    MaterialPageRoute(
+      builder: (context) => MobileDisplaySettingsPage(id: id),
+    ),
+  );
+}
+
+class MobileDisplaySettingsPage extends StatefulWidget {
+  final String id;
+  const MobileDisplaySettingsPage({Key? key, required this.id}) : super(key: key);
+
+  @override
+  State<MobileDisplaySettingsPage> createState() => _MobileDisplaySettingsPageState();
+}
+
+class _MobileDisplaySettingsPageState extends State<MobileDisplaySettingsPage> {
+  static const Color _titleColor = Color(0xFF454447);
+  static const Color _labelColor = Color(0xFF646368);
+  static const Color _accentColor = Color(0xFF5F71FF);
+
+  List<TRadioMenu<String>> _viewStyleRadios = [];
+  List<TRadioMenu<String>> _imageQualityRadios = [];
+  List<TRadioMenu<String>> _codecRadios = [];
+  List<TToggleMenu> _cursorToggles = [];
+  List<TToggleMenu> _displayToggles = [];
+  List<TToggleMenu> _privacyModeList = [];
+  RxString? _privacyModeState;
+  bool _loaded = false;
+
+  late final RxString _viewStyle;
+  late final RxString _imageQuality;
+  late final RxString _codec;
+  late final RxString _resolution;
+
+  @override
+  void initState() {
+    super.initState();
+    _viewStyle = ''.obs;
+    _imageQuality = ''.obs;
+    _codec = ''.obs;
+    _resolution = ''.obs;
+    _loadSettings();
   }
 
-  List<TRadioMenu<String>> viewStyleRadios =
-      await toolbarViewStyle(context, id, gFFI);
-  List<TRadioMenu<String>> imageQualityRadios =
-      await toolbarImageQuality(context, id, gFFI);
-  List<TRadioMenu<String>> codecRadios = await toolbarCodec(context, id, gFFI);
-  List<TToggleMenu> cursorToggles = await toolbarCursor(context, id, gFFI);
-  List<TToggleMenu> displayToggles =
-      await toolbarDisplayToggle(context, id, gFFI);
-
-  List<TToggleMenu> privacyModeList = [];
-  // privacy mode
-  final privacyModeState = PrivacyModeState.find(id);
-  if (gFFI.ffiModel.keyboard && gFFI.ffiModel.pi.features.privacyMode) {
-    privacyModeList = toolbarPrivacyMode(privacyModeState, context, id, gFFI);
-    if (privacyModeList.length == 1) {
-      displayToggles.add(privacyModeList[0]);
-    }
-  }
-
-  dialogManager.show((setState, close, context) {
-    var viewStyle =
-        (viewStyleRadios.isNotEmpty ? viewStyleRadios[0].groupValue : '').obs;
-    var imageQuality =
-        (imageQualityRadios.isNotEmpty ? imageQualityRadios[0].groupValue : '')
-            .obs;
-    var codec = (codecRadios.isNotEmpty ? codecRadios[0].groupValue : '').obs;
-    final radios = [
-      for (var e in viewStyleRadios)
-        Obx(() => getRadio<String>(
-            e.child,
-            e.value,
-            viewStyle.value,
-            e.onChanged != null
-                ? (v) {
-                    e.onChanged?.call(v);
-                    if (v != null) viewStyle.value = v;
-                  }
-                : null)),
-      // Show custom scale controls when custom view style is selected
-      Obx(() => viewStyle.value == kRemoteViewStyleCustom
-          ? MobileCustomScaleControls(ffi: gFFI)
-          : const SizedBox.shrink()),
-      const Divider(color: MyTheme.border),
-      for (var e in imageQualityRadios)
-        Obx(() => getRadio<String>(
-            e.child,
-            e.value,
-            imageQuality.value,
-            e.onChanged != null
-                ? (v) {
-                    e.onChanged?.call(v);
-                    if (v != null) imageQuality.value = v;
-                  }
-                : null)),
-      const Divider(color: MyTheme.border),
-      for (var e in codecRadios)
-        Obx(() => getRadio<String>(
-            e.child,
-            e.value,
-            codec.value,
-            e.onChanged != null
-                ? (v) {
-                    e.onChanged?.call(v);
-                    if (v != null) codec.value = v;
-                  }
-                : null)),
-      if (codecRadios.isNotEmpty) const Divider(color: MyTheme.border),
-    ];
-    final rxCursorToggleValues = cursorToggles.map((e) => e.value.obs).toList();
-    final cursorTogglesList = cursorToggles
-        .asMap()
-        .entries
-        .map((e) => Obx(() => CheckboxListTile(
-            contentPadding: EdgeInsets.zero,
-            visualDensity: VisualDensity.compact,
-            value: rxCursorToggleValues[e.key].value,
-            onChanged: e.value.onChanged != null
-                ? (v) {
-                    e.value.onChanged?.call(v);
-                    if (v != null) rxCursorToggleValues[e.key].value = v;
-                  }
-                : null,
-            title: e.value.child)))
+  Future<void> _loadSettings() async {
+    _viewStyleRadios = (await toolbarViewStyle(context, widget.id, gFFI))
+        .where((e) => e.value != kRemoteViewStyleCustom)
+        .toList();
+    _imageQualityRadios = (await toolbarImageQuality(context, widget.id, gFFI))
+        .where((e) => e.value != kRemoteImageQualityCustom)
+        .toList();
+    _codecRadios = await toolbarCodec(context, widget.id, gFFI);
+    _cursorToggles = await toolbarCursor(context, widget.id, gFFI);
+    _displayToggles = (await toolbarDisplayToggle(context, widget.id, gFFI))
+        .where((e) => _extractText(e.child) != translate('Show quality monitor'))
         .toList();
 
-    final rxToggleValues = displayToggles.map((e) => e.value.obs).toList();
-    final displayTogglesList = displayToggles
-        .asMap()
-        .entries
-        .map((e) => Obx(() => CheckboxListTile(
-            contentPadding: EdgeInsets.zero,
-            visualDensity: VisualDensity.compact,
-            value: rxToggleValues[e.key].value,
-            onChanged: e.value.onChanged != null
-                ? (v) {
-                    e.value.onChanged?.call(v);
-                    if (v != null) rxToggleValues[e.key].value = v;
-                  }
-                : null,
-            title: e.value.child)))
-        .toList();
-    final toggles = [
-      ...cursorTogglesList,
-      if (cursorToggles.isNotEmpty) const Divider(color: MyTheme.border),
-      ...displayTogglesList,
-    ];
-
-    Widget privacyModeWidget = Offstage();
-    if (privacyModeList.length > 1) {
-      privacyModeWidget = ListTile(
-        contentPadding: EdgeInsets.zero,
-        visualDensity: VisualDensity.compact,
-        title: Text(translate('Privacy mode')),
-        onTap: () => setPrivacyModeDialog(
-            dialogManager, privacyModeList, privacyModeState),
-      );
+    _privacyModeState = PrivacyModeState.find(widget.id);
+    if (gFFI.ffiModel.keyboard && gFFI.ffiModel.pi.features.privacyMode) {
+      _privacyModeList = toolbarPrivacyMode(
+          _privacyModeState!, context, widget.id, gFFI);
+      if (_privacyModeList.length == 1) {
+        _displayToggles.add(_privacyModeList[0]);
+      }
     }
 
-    var popupDialogMenus = List<Widget>.empty(growable: true);
-    final resolution = getResolutionMenu(gFFI, id);
-    if (resolution != null) {
-      popupDialogMenus.add(ListTile(
-        contentPadding: EdgeInsets.zero,
-        visualDensity: VisualDensity.compact,
-        title: resolution.child,
-        onTap: () {
-          close();
-          resolution.onPressed?.call();
-        },
-      ));
+    // Use defaults as source of truth, fallback to session value
+    final sessionView = _viewStyleRadios.isNotEmpty
+        ? _viewStyleRadios[0].groupValue : '';
+    final sessionQuality = _imageQualityRadios.isNotEmpty
+        ? _imageQualityRadios[0].groupValue : '';
+    final sessionCodec = _codecRadios.isNotEmpty
+        ? _codecRadios[0].groupValue : '';
+
+    final defView = bind.mainGetUserDefaultOption(key: kOptionViewStyle);
+    final defQuality = bind.mainGetUserDefaultOption(key: kOptionImageQuality);
+    final defCodec = bind.mainGetUserDefaultOption(key: kOptionCodecPreference);
+
+    _viewStyle.value = defView.isNotEmpty ? defView : sessionView;
+    _imageQuality.value = defQuality.isNotEmpty ? defQuality : sessionQuality;
+    _codec.value = defCodec.isNotEmpty ? defCodec : sessionCodec;
+
+    // Apply defaults to current session if they differ
+    if (_viewStyle.value != sessionView && _viewStyle.value.isNotEmpty) {
+      final item = _viewStyleRadios.firstWhereOrNull(
+          (e) => e.value == _viewStyle.value);
+      item?.onChanged?.call(_viewStyle.value);
     }
-    final virtualDisplayMenu = getVirtualDisplayMenu(gFFI, id);
-    if (virtualDisplayMenu != null) {
-      popupDialogMenus.add(ListTile(
-        contentPadding: EdgeInsets.zero,
-        visualDensity: VisualDensity.compact,
-        title: virtualDisplayMenu.child,
-        onTap: () {
-          close();
-          virtualDisplayMenu.onPressed?.call();
-        },
-      ));
+    if (_imageQuality.value != sessionQuality && _imageQuality.value.isNotEmpty) {
+      final item = _imageQualityRadios.firstWhereOrNull(
+          (e) => e.value == _imageQuality.value);
+      item?.onChanged?.call(_imageQuality.value);
     }
-    if (popupDialogMenus.isNotEmpty) {
-      popupDialogMenus.add(const Divider(color: MyTheme.border));
+    if (_codec.value != sessionCodec && _codec.value.isNotEmpty) {
+      final item = _codecRadios.firstWhereOrNull(
+          (e) => e.value == _codec.value);
+      item?.onChanged?.call(_codec.value);
     }
 
-    return CustomAlertDialog(
-      content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: displays +
-              radios +
-              popupDialogMenus +
-              toggles +
-              [privacyModeWidget]),
+    // Sync toggle defaults to session
+    _syncToggleListFromDefaults(_cursorToggles);
+    _syncToggleListFromDefaults(_displayToggles);
+
+    // Resolution
+    final display = gFFI.ffiModel.pi.tryGetDisplayIfNotAllDisplay(
+        display: gFFI.ffiModel.pi.currentDisplay);
+    if (display != null) {
+      _resolution.value = '${display.width}x${display.height}';
+    }
+
+    setState(() => _loaded = true);
+  }
+
+  void _syncToggleListFromDefaults(List<TToggleMenu> toggles) {
+    for (final toggle in toggles) {
+      final text = _extractText(toggle.child);
+      for (final entry in _toggleDefaultKeyMap.entries) {
+        if (translate(entry.key) == text) {
+          final defVal = bind.mainGetUserDefaultOption(key: entry.value) == 'Y';
+          if (defVal != toggle.value && toggle.onChanged != null) {
+            toggle.onChanged!(defVal);
+          }
+          break;
+        }
+      }
+    }
+  }
+
+  String _extractText(Widget w) {
+    if (w is Text) return w.data ?? '';
+    return '';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: Colors.white,
+      appBar: AppBar(
+        backgroundColor: Colors.white,
+        elevation: 0,
+        surfaceTintColor: Colors.transparent,
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back_ios,
+              color: _titleColor, size: 20),
+          onPressed: () => Navigator.of(context).pop(),
+        ),
+        title: Text(
+          translate('Display Settings'),
+          style: const TextStyle(
+            color: _titleColor,
+            fontSize: 18,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+        centerTitle: true,
+      ),
+      body: _loaded
+          ? SingleChildScrollView(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+              child: Obx(() => Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  _buildDisplaySelector(),
+                  if (_viewStyleRadios.isNotEmpty)
+                    _buildDropdownCard(
+                      title: translate('Default View Style'),
+                      value: _viewStyle.value,
+                      items: _viewStyleRadios,
+                      onChanged: (v) {
+                        final item = _viewStyleRadios
+                            .firstWhereOrNull((e) => e.value == v);
+                        if (item != null) {
+                          item.onChanged?.call(v);
+                          _viewStyle.value = v;
+                          bind.mainSetUserDefaultOption(
+                              key: kOptionViewStyle, value: v);
+                        }
+                      },
+                    ),
+                  if (_imageQualityRadios.isNotEmpty)
+                    _buildDropdownCard(
+                      title: translate('Default Image Quality'),
+                      value: _imageQuality.value,
+                      items: _imageQualityRadios,
+                      onChanged: (v) {
+                        final item = _imageQualityRadios
+                            .firstWhereOrNull((e) => e.value == v);
+                        if (item != null) {
+                          item.onChanged?.call(v);
+                          _imageQuality.value = v;
+                          bind.mainSetUserDefaultOption(
+                              key: kOptionImageQuality, value: v);
+                        }
+                      },
+                    ),
+                  if (_codecRadios.isNotEmpty)
+                    _buildDropdownCard(
+                      title: translate('Default Codec'),
+                      value: _codec.value,
+                      items: _codecRadios,
+                      onChanged: (v) {
+                        final item = _codecRadios
+                            .firstWhereOrNull((e) => e.value == v);
+                        if (item != null) {
+                          item.onChanged?.call(v);
+                          _codec.value = v;
+                          bind.mainSetUserDefaultOption(
+                              key: kOptionCodecPreference, value: v);
+                        }
+                      },
+                    ),
+                  _buildResolutionDropdown(),
+                  if (_cursorToggles.isNotEmpty || _displayToggles.isNotEmpty)
+                    _buildToggleCard(
+                      translate('Display'),
+                      [
+                        ..._buildToggles(_cursorToggles),
+                        ..._buildToggles(_displayToggles),
+                      ],
+                    ),
+                  _buildPrivacyMode(),
+                  const SizedBox(height: 24),
+                ],
+              )),
+            )
+          : const Center(child: CircularProgressIndicator()),
     );
-  }, clickMaskDismiss: true, backDismiss: true).then((value) {
-    _disableAndroidSoftKeyboard();
-  });
+  }
+
+  BoxDecoration get _cardDecoration => BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(12),
+        boxShadow: const [
+          BoxShadow(
+            color: Color(0x26333C87),
+            blurRadius: 8,
+            offset: Offset(0, 2),
+          ),
+        ],
+      );
+
+  /// 드롭다운 카드 (View Style, Image Quality, Codec)
+  Widget _buildDropdownCard({
+    required String title,
+    required String value,
+    required List<TRadioMenu<String>> items,
+    required ValueChanged<String> onChanged,
+  }) {
+    final labelMap = <String, String>{};
+    for (final item in items) {
+      labelMap[item.value] = _extractText(item.child);
+    }
+    final displayValue = labelMap[value] ?? value;
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 12),
+      decoration: _cardDecoration,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 16, 16, 12),
+            child: Text(
+              title,
+              style: const TextStyle(
+                color: _titleColor,
+                fontSize: 14,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+          ),
+          const Divider(
+              height: 1, color: Color(0xFFEEEEEE), indent: 16, endIndent: 16),
+          Padding(
+            padding: const EdgeInsets.all(16),
+            child: Container(
+              height: 48,
+              decoration: BoxDecoration(
+                border: Border.all(color: const Color(0xFFDEDEE2)),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: DropdownButton<String>(
+                value: displayValue,
+                items: items.map((item) {
+                  final label = _extractText(item.child);
+                  return DropdownMenuItem<String>(
+                    value: label,
+                    child: Padding(
+                      padding: const EdgeInsets.only(left: 16),
+                      child: Text(
+                        label,
+                        style: const TextStyle(
+                          color: _titleColor,
+                          fontSize: 14,
+                        ),
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                  );
+                }).toList(),
+                onChanged: (newLabel) {
+                  if (newLabel == null) return;
+                  final item = items.firstWhereOrNull(
+                      (e) => _extractText(e.child) == newLabel);
+                  if (item != null) {
+                    onChanged(item.value);
+                  }
+                },
+                isExpanded: true,
+                underline: const SizedBox.shrink(),
+                icon: const Padding(
+                  padding: EdgeInsets.only(right: 16),
+                  child: Icon(Icons.expand_more, color: _labelColor, size: 20),
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// 해상도 드롭다운 카드
+  Widget _buildResolutionDropdown() {
+    final pi = gFFI.ffiModel.pi;
+    final resolutions = pi.resolutions;
+    final display = pi.tryGetDisplayIfNotAllDisplay(display: pi.currentDisplay);
+    final visible = gFFI.ffiModel.keyboard && resolutions.length > 1 && display != null;
+    if (!visible) return const SizedBox.shrink();
+
+    final currentRes = _resolution.value;
+    final resItems = resolutions
+        .map((e) => '${e.width}x${e.height}')
+        .toList();
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 12),
+      decoration: _cardDecoration,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 16, 16, 12),
+            child: Text(
+              translate('Resolution'),
+              style: const TextStyle(
+                color: _titleColor,
+                fontSize: 14,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+          ),
+          const Divider(
+              height: 1, color: Color(0xFFEEEEEE), indent: 16, endIndent: 16),
+          Padding(
+            padding: const EdgeInsets.all(16),
+            child: Container(
+              height: 48,
+              decoration: BoxDecoration(
+                border: Border.all(color: const Color(0xFFDEDEE2)),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: DropdownButton<String>(
+                value: resItems.contains(currentRes) ? currentRes : null,
+                items: resItems.map((res) {
+                  return DropdownMenuItem<String>(
+                    value: res,
+                    child: Padding(
+                      padding: const EdgeInsets.only(left: 16),
+                      child: Text(
+                        res,
+                        style: const TextStyle(
+                          color: _titleColor,
+                          fontSize: 14,
+                        ),
+                      ),
+                    ),
+                  );
+                }).toList(),
+                onChanged: (newRes) {
+                  if (newRes == null) return;
+                  final parts = newRes.split('x');
+                  if (parts.length == 2) {
+                    final w = int.tryParse(parts[0]);
+                    final h = int.tryParse(parts[1]);
+                    if (w != null && h != null) {
+                      _resolution.value = newRes;
+                      bind.sessionChangeResolution(
+                        sessionId: gFFI.sessionId,
+                        display: pi.currentDisplay,
+                        width: w,
+                        height: h,
+                      );
+                    }
+                  }
+                },
+                isExpanded: true,
+                underline: const SizedBox.shrink(),
+                icon: const Padding(
+                  padding: EdgeInsets.only(right: 16),
+                  child: Icon(Icons.expand_more, color: _labelColor, size: 20),
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// 토글 카드
+  Widget _buildToggleCard(String title, List<Widget> children) {
+    if (children.isEmpty) return const SizedBox.shrink();
+    return Container(
+      margin: const EdgeInsets.only(bottom: 12),
+      decoration: _cardDecoration,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 16, 16, 12),
+            child: Text(
+              title,
+              style: const TextStyle(
+                color: _titleColor,
+                fontSize: 14,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+          ),
+          const Divider(
+              height: 1,
+              color: Color(0xFFEEEEEE),
+              indent: 16,
+              endIndent: 16),
+          ...children,
+          const SizedBox(height: 8),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildToggleRow({
+    required Widget child,
+    required bool value,
+    required ValueChanged<bool?>? onChanged,
+  }) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      child: Row(
+        children: [
+          Expanded(
+            child: DefaultTextStyle(
+              style: const TextStyle(
+                color: _titleColor,
+                fontSize: 14,
+              ),
+              child: child,
+            ),
+          ),
+          CmCustomToggle(
+            value: value,
+            onChanged: onChanged != null
+                ? (v) => onChanged(v)
+                : null,
+          ),
+        ],
+      ),
+    );
+  }
+
+  static const _toggleDefaultKeyMap = <String, String>{
+    'Show remote cursor': kOptionShowRemoteCursor,
+    'Follow remote cursor': kOptionFollowRemoteCursor,
+    'Follow remote window focus': kOptionFollowRemoteWindow,
+    'Mute': kOptionDisableAudio,
+    'Enable file copy and paste': kOptionEnableFileCopyPaste,
+    'Disable clipboard': kOptionDisableClipboard,
+    'Lock after session end': kOptionLockAfterSessionEnd,
+    'True color (4:4:4)': kOptionI444,
+  };
+
+  void _syncToggleToDefault(Widget child, bool value) {
+    final text = _extractText(child);
+    for (final entry in _toggleDefaultKeyMap.entries) {
+      if (translate(entry.key) == text) {
+        bind.mainSetUserDefaultOption(
+            key: entry.value, value: value ? 'Y' : '');
+        return;
+      }
+    }
+  }
+
+  List<Widget> _buildToggles(List<TToggleMenu> toggles) {
+    final rxValues = toggles.map((e) => e.value.obs).toList();
+    return toggles
+        .asMap()
+        .entries
+        .map((e) => Obx(() => _buildToggleRow(
+            child: e.value.child,
+            value: rxValues[e.key].value,
+            onChanged: e.value.onChanged != null
+                ? (v) {
+                    e.value.onChanged?.call(v);
+                    if (v != null) {
+                      rxValues[e.key].value = v;
+                      _syncToggleToDefault(e.value.child, v);
+                    }
+                  }
+                : null)))
+        .toList();
+  }
+
+  Widget _buildDisplaySelector() {
+    final pi = gFFI.ffiModel.pi;
+    if (pi.displays.length <= 1 || pi.currentDisplay == kAllDisplayValue) {
+      return const SizedBox.shrink();
+    }
+    final cur = pi.currentDisplay;
+    return Container(
+      margin: const EdgeInsets.only(bottom: 12),
+      decoration: _cardDecoration,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 16, 16, 12),
+            child: Text(
+              translate('Display'),
+              style: const TextStyle(
+                color: _titleColor,
+                fontSize: 14,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+          ),
+          const Divider(
+              height: 1,
+              color: Color(0xFFEEEEEE),
+              indent: 16,
+              endIndent: 16),
+          Padding(
+            padding: const EdgeInsets.all(16),
+            child: Wrap(
+              spacing: 8,
+              children: List.generate(pi.displays.length, (i) {
+                final selected = i == cur;
+                return GestureDetector(
+                  onTap: () {
+                    if (i == cur) return;
+                    openMonitorInTheSameTab(i, gFFI, pi);
+                    Navigator.of(context).pop();
+                  },
+                  child: Container(
+                    width: 44,
+                    height: 44,
+                    decoration: BoxDecoration(
+                      color: selected
+                          ? _accentColor
+                          : const Color(0xFFEFF1FF),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: Center(
+                      child: Text(
+                        (i + 1).toString(),
+                        style: TextStyle(
+                          color: selected
+                              ? Colors.white
+                              : _accentColor,
+                          fontWeight: FontWeight.bold,
+                          fontSize: 16,
+                        ),
+                      ),
+                    ),
+                  ),
+                );
+              }),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildPrivacyMode() {
+    if (_privacyModeList.length <= 1) return const SizedBox.shrink();
+    return Container(
+      margin: const EdgeInsets.only(bottom: 12),
+      decoration: _cardDecoration,
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          borderRadius: BorderRadius.circular(12),
+          onTap: () => setPrivacyModeDialog(
+              gFFI.dialogManager, _privacyModeList, _privacyModeState!),
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    translate('Privacy mode'),
+                    style: const TextStyle(
+                      color: _titleColor,
+                      fontSize: 14,
+                    ),
+                  ),
+                ),
+                const Icon(Icons.arrow_forward_ios,
+                    color: Color(0xFF8F8E95), size: 16),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
 }
 
 TTextMenu? getVirtualDisplayMenu(FFI ffi, String id) {

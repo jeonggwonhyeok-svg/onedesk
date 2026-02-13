@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_hbb/common.dart';
+import 'package:flutter_hbb/common/widgets/styled_form_widgets.dart';
 import 'package:flutter_hbb/desktop/widgets/tabbar_widget.dart';
 import 'package:flutter_hbb/models/platform_model.dart';
 import 'package:flutter_hbb/models/state_model.dart';
@@ -152,11 +153,13 @@ class _InstallPageBodyState extends State<_InstallPageBody>
                     ).workaroundFreezeLinuxMint().marginOnly(right: 10),
                   ),
                   Obx(
-                    () => OutlinedButton.icon(
+                    () => StyledOutlinedButton(
                       icon: Icon(Icons.folder_outlined, size: 16),
+                      label: translate('Change Path'),
                       onPressed: btnEnabled.value ? selectInstallPath : null,
-                      style: buttonStyle,
-                      label: Text(translate('Change Path')),
+                      fontSize: 14,
+                      fillWidth: false,
+                      padding: EdgeInsets.symmetric(vertical: 15, horizontal: 12),
                     ),
                   )
                 ],
@@ -214,12 +217,14 @@ class _InstallPageBodyState extends State<_InstallPageBody>
                         : Offstage()),
                   ),
                   Obx(
-                    () => OutlinedButton.icon(
+                    () => StyledOutlinedButton(
                       icon: Icon(Icons.close_rounded, size: 16),
-                      label: Text(translate('Cancel')),
+                      label: translate('Cancel'),
                       onPressed:
                           btnEnabled.value ? () => windowManager.close() : null,
-                      style: buttonStyle,
+                      fontSize: 14,
+                      fillWidth: false,
+                      padding: EdgeInsets.symmetric(vertical: 15, horizontal: 12),
                     ).marginOnly(right: 10),
                   ),
                   Obx(
@@ -233,13 +238,15 @@ class _InstallPageBodyState extends State<_InstallPageBody>
                   Offstage(
                     offstage: bind.installShowRunWithoutInstall(),
                     child: Obx(
-                      () => OutlinedButton.icon(
+                      () => StyledOutlinedButton(
                         icon: Icon(Icons.screen_share_outlined, size: 16),
-                        label: Text(translate('Run without install')),
+                        label: translate('Run without install'),
                         onPressed: btnEnabled.value
                             ? () => bind.installRunWithoutInstall()
                             : null,
-                        style: buttonStyle,
+                        fontSize: 14,
+                        fillWidth: false,
+                        padding: EdgeInsets.symmetric(vertical: 15, horizontal: 12),
                       ).marginOnly(left: 10),
                     ),
                   ),

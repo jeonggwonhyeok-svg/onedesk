@@ -1,4 +1,4 @@
-# RustDesk msi project
+# OneDesk msi project
 
 Use Visual Studio 2022 to compile this project.
 

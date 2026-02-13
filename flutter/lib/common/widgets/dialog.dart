@@ -19,6 +19,9 @@ import '../../common.dart';
 import '../../models/model.dart';
 import '../../models/platform_model.dart';
 import 'address_book.dart';
+import 'auth_layout.dart';
+import 'styled_form_widgets.dart';
+import 'styled_text_field.dart';
 
 void clientClose(SessionID sessionId, FFI ffi) async {
   if (allowAskForNoteAtEndOfConnection(ffi, true)) {
@@ -130,17 +133,15 @@ void changeIdDialog() {
           const SizedBox(
             height: 12.0,
           ),
-          TextField(
-            decoration: InputDecoration(
-                labelText: translate('Your new ID'),
-                errorText: msg.isEmpty ? null : translate(msg),
-                suffixText: '${rxId.value.length}/16',
-                suffixStyle: const TextStyle(fontSize: 12, color: Colors.grey)),
+          StyledTextField(
+            controller: controller,
+            labelText: translate('Your new ID'),
+            errorText: msg.isEmpty ? null : translate(msg),
+            suffixText: '${rxId.value.length}/16',
+            suffixStyle: const TextStyle(fontSize: 12, color: Colors.grey),
             inputFormatters: [
               LengthLimitingTextInputFormatter(16),
-              // FilteringTextInputFormatter(RegExp(r"[a-zA-z][a-zA-z0-9\_]*"), allow: true)
             ],
-            controller: controller,
             autofocus: true,
             onChanged: (value) {
               setState(() {
@@ -148,7 +149,7 @@ void changeIdDialog() {
                 msg = '';
               });
             },
-          ).workaroundFreezeLinuxMint(),
+          ),
           const SizedBox(
             height: 8.0,
           ),
@@ -177,8 +178,18 @@ void changeIdDialog() {
         ],
       ),
       actions: [
-        dialogButton("Cancel", onPressed: close, isOutline: true),
-        dialogButton("OK", onPressed: submit),
+        SizedBox(
+          width: double.infinity,
+          child: Row(
+            children: [
+              Expanded(
+                  child:
+                      dialogButton("Cancel", onPressed: close, isOutline: true)),
+              const SizedBox(width: 12),
+              Expanded(child: dialogButton("OK", onPressed: submit)),
+            ],
+          ),
+        ),
       ],
       onSubmit: submit,
       onCancel: close,
@@ -188,95 +199,409 @@ void changeIdDialog() {
 
 void changeWhiteList({Function()? callback}) async {
   final curWhiteList = await bind.mainGetOption(key: kOptionWhitelist);
-  var newWhiteListField = curWhiteList == defaultOptionWhitelist
-      ? ''
-      : curWhiteList.split(',').join('\n');
-  var controller = TextEditingController(text: newWhiteListField);
+
+  // IP 목록 파싱
+  List<String> ipList = [];
+  if (curWhiteList.isNotEmpty && curWhiteList != defaultOptionWhitelist) {
+    ipList =
+        curWhiteList.split(',').where((ip) => ip.trim().isNotEmpty).toList();
+  }
+
+  var inputController = TextEditingController();
   var msg = "";
-  var isInProgress = false;
+  Set<int> selectedIndices = {};
   final isOptFixed = isOptionFixed(kOptionWhitelist);
+
+  // 편집 모드 상태
+  int? editingIndex;
+  var editController = TextEditingController();
+  var editMsg = "";
+
+  // IP 유효성 검사 함수
+  bool isValidIP(String ip) {
+    final ipMatch = RegExp(
+        r"^(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]?|0)\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]?|0)\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]?|0)\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]?|0)(\/([1-9]|[1-2][0-9]|3[0-2])){0,1}$");
+    final ipv6Match = RegExp(
+        r"^(((?:[0-9A-Fa-f]{1,4}))*((?::[0-9A-Fa-f]{1,4}))*::((?:[0-9A-Fa-f]{1,4}))*((?::[0-9A-Fa-f]{1,4}))*|((?:[0-9A-Fa-f]{1,4}))((?::[0-9A-Fa-f]{1,4})){7})(\/([1-9]|[1-9][0-9]|1[0-1][0-9]|12[0-8])){0,1}$");
+    return ipMatch.hasMatch(ip) || ipv6Match.hasMatch(ip);
+  }
+
   gFFI.dialogManager.show((setState, close, context) {
-    return CustomAlertDialog(
-      title: Text(translate("IP Whitelisting")),
-      content: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(translate("whitelist_sep")),
-          const SizedBox(
-            height: 8.0,
+    // 편집 모드일 때 수정 다이얼로그 표시
+    if (editingIndex != null) {
+      return CustomAlertDialog(
+        title: Text(
+          translate("IP Whitelisting Edit"),
+          style: const TextStyle(
+            fontSize: 18,
+            fontWeight: FontWeight.bold,
+            color: Color(0xFF454447),
           ),
-          Row(
-            children: [
-              Expanded(
-                child: TextField(
-                        maxLines: null,
-                        decoration: InputDecoration(
-                          errorText: msg.isEmpty ? null : translate(msg),
-                        ),
-                        controller: controller,
-                        enabled: !isOptFixed,
-                        autofocus: true)
-                    .workaroundFreezeLinuxMint(),
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            TextField(
+              controller: editController,
+              decoration: InputDecoration(
+                hintText: translate("IP Whitelisting Inputpre"),
+                hintStyle: const TextStyle(color: Color(0xFFB0B0B0)),
+                errorText: editMsg.isEmpty ? null : editMsg,
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(8),
+                  borderSide: const BorderSide(color: Color(0xFFE0E0E0)),
+                ),
+                enabledBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(8),
+                  borderSide: const BorderSide(color: Color(0xFFE0E0E0)),
+                ),
+                focusedBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(8),
+                  borderSide: const BorderSide(color: Color(0xFF4B7BF5)),
+                ),
+                contentPadding:
+                    const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
               ),
-            ],
-          ),
-          const SizedBox(
-            height: 4.0,
-          ),
-          // NOT use Offstage to wrap LinearProgressIndicator
-          if (isInProgress) const LinearProgressIndicator(),
-        ],
+              autofocus: true,
+            ),
+            const SizedBox(height: 20),
+            Row(
+              children: [
+                Expanded(
+                  child: StyledOutlinedButton(
+                    label: translate("Cancel"),
+                    onPressed: () {
+                      setState(() {
+                        editingIndex = null;
+                        editMsg = "";
+                      });
+                    },
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: StyledCompactButton(
+                    label: translate("Edit"),
+                    onPressed: () {
+                      final newIP = editController.text.trim();
+                      if (newIP.isEmpty) {
+                        setState(() => editMsg = translate("Invalid IP"));
+                        return;
+                      }
+                      if (!isValidIP(newIP)) {
+                        setState(() =>
+                            editMsg = "${translate("Invalid IP")} $newIP");
+                        return;
+                      }
+                      setState(() {
+                        ipList[editingIndex!] = newIP;
+                        editingIndex = null;
+                        editMsg = "";
+                      });
+                    },
+                    fillWidth: true,
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
+        onCancel: () {
+          setState(() {
+            editingIndex = null;
+            editMsg = "";
+          });
+        },
+      );
+    }
+
+    // 메인 IP 리스트 다이얼로그
+    return CustomAlertDialog(
+      title: Text(
+        translate("IP Whitelisting"),
+        style: const TextStyle(
+          fontSize: 18,
+          fontWeight: FontWeight.bold,
+          color: Color(0xFF454447),
+        ),
       ),
-      actions: [
-        dialogButton("Cancel", onPressed: close, isOutline: true),
-        if (!isOptFixed)
-          dialogButton("Clear", onPressed: () async {
-            await bind.mainSetOption(
-                key: kOptionWhitelist, value: defaultOptionWhitelist);
-            callback?.call();
-            close();
-          }, isOutline: true),
-        if (!isOptFixed)
-          dialogButton(
-            "OK",
-            onPressed: () async {
-              setState(() {
-                msg = "";
-                isInProgress = true;
-              });
-              newWhiteListField = controller.text.trim();
-              var newWhiteList = "";
-              if (newWhiteListField.isEmpty) {
-                // pass
-              } else {
-                final ips =
-                    newWhiteListField.trim().split(RegExp(r"[\s,;\n]+"));
-                // test ip
-                final ipMatch = RegExp(
-                    r"^(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]?|0)\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]?|0)\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]?|0)\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]?|0)(\/([1-9]|[1-2][0-9]|3[0-2])){0,1}$");
-                final ipv6Match = RegExp(
-                    r"^(((?:[0-9A-Fa-f]{1,4}))*((?::[0-9A-Fa-f]{1,4}))*::((?:[0-9A-Fa-f]{1,4}))*((?::[0-9A-Fa-f]{1,4}))*|((?:[0-9A-Fa-f]{1,4}))((?::[0-9A-Fa-f]{1,4})){7})(\/([1-9]|[1-9][0-9]|1[0-1][0-9]|12[0-8])){0,1}$");
-                for (final ip in ips) {
-                  if (!ipMatch.hasMatch(ip) && !ipv6Match.hasMatch(ip)) {
-                    msg = "${translate("Invalid IP")} $ip";
-                    setState(() {
-                      isInProgress = false;
-                    });
-                    return;
-                  }
-                }
-                newWhiteList = ips.join(',');
-              }
-              if (newWhiteList.trim().isEmpty) {
-                newWhiteList = defaultOptionWhitelist;
-              }
-              await bind.mainSetOption(
-                  key: kOptionWhitelist, value: newWhiteList);
-              callback?.call();
-              close();
-            },
-          ),
-      ],
+      content: SizedBox(
+        width: 360,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // 부제목
+            Text(
+              translate("IP Whitelisting Subtitle"),
+              style: const TextStyle(
+                fontSize: 13,
+                color: Color(0xFF646368),
+                height: 1.5,
+              ),
+            ),
+            const SizedBox(height: 20),
+
+            // IP 주소 라벨
+            Text(
+              translate("IP Address"),
+              style: const TextStyle(
+                fontSize: 14,
+                fontWeight: FontWeight.bold,
+                color: Color(0xFF454447),
+              ),
+            ),
+            const SizedBox(height: 8),
+
+            // IP 입력 + 등록 버튼
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Flexible(
+                  flex: 3,
+                  child: SizedBox(
+                    height: 52,
+                    child: TextField(
+                      controller: inputController,
+                      enabled: !isOptFixed,
+                      decoration: InputDecoration(
+                        hintText: translate("IP Whitelisting Inputpre"),
+                        hintStyle: const TextStyle(color: Color(0xFFB0B0B0)),
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(8),
+                          borderSide: BorderSide(
+                            color: msg.isNotEmpty ? Colors.red : const Color(0xFFE0E0E0),
+                          ),
+                        ),
+                        enabledBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(8),
+                          borderSide: BorderSide(
+                            color: msg.isNotEmpty ? Colors.red : const Color(0xFFE0E0E0),
+                          ),
+                        ),
+                        focusedBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(8),
+                          borderSide: BorderSide(
+                            color: msg.isNotEmpty ? Colors.red : const Color(0xFF4B7BF5),
+                          ),
+                        ),
+                        contentPadding: const EdgeInsets.symmetric(
+                            horizontal: 12, vertical: 16),
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                SizedBox(
+                  width: 120,
+                  height: 52,
+                  child: StyledOutlinedButton(
+                    label: translate("Register"),
+                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 0),
+                    onPressed: isOptFixed
+                        ? null
+                        : () {
+                            final newIP = inputController.text.trim();
+                            if (newIP.isEmpty) {
+                              setState(() => msg = translate("Invalid IP"));
+                              return;
+                            }
+                            if (!isValidIP(newIP)) {
+                              setState(() =>
+                                  msg = "${translate("Invalid IP")} $newIP");
+                              return;
+                            }
+                            if (ipList.contains(newIP)) {
+                              setState(
+                                  () => msg = translate("IP already exists"));
+                              return;
+                            }
+                            setState(() {
+                              ipList.add(newIP);
+                              inputController.clear();
+                              msg = "";
+                            });
+                          },
+                  ),
+                ),
+              ],
+            ),
+            // 에러 메시지
+            if (msg.isNotEmpty)
+              Padding(
+                padding: const EdgeInsets.only(top: 8),
+                child: Text(
+                  msg,
+                  style: const TextStyle(color: Colors.red, fontSize: 13),
+                ),
+              ),
+            SizedBox(height: msg.isNotEmpty ? 16 : 24),
+
+            // 등록된 IP 주소 헤더
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Text(
+                  translate("IP Whitelisting Listtitle"),
+                  style: const TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.bold,
+                    color: Color(0xFF454447),
+                  ),
+                ),
+                if (selectedIndices.isNotEmpty)
+                  _HoverText(
+                    text: translate("Remove"),
+                    normalColor: const Color(0xFF8F8E95),
+                    hoverColor: const Color(0xFF5F71FF),
+                    onTap: () {
+                      setState(() {
+                        final toRemove = selectedIndices.toList()
+                          ..sort((a, b) => b.compareTo(a));
+                        for (final idx in toRemove) {
+                          if (idx < ipList.length) ipList.removeAt(idx);
+                        }
+                        selectedIndices.clear();
+                      });
+                    },
+                  ),
+              ],
+            ),
+            const SizedBox(height: 12),
+
+            // IP 목록
+            Container(
+              constraints: const BoxConstraints(maxHeight: 200),
+              child: ipList.isEmpty
+                  ? Center(
+                      child: Padding(
+                        padding: const EdgeInsets.all(20),
+                        child: Text(
+                          translate("Empty"),
+                          style: const TextStyle(color: Color(0xFF8F8E95)),
+                        ),
+                      ),
+                    )
+                  : ListView.builder(
+                      shrinkWrap: true,
+                      itemCount: ipList.length,
+                      itemBuilder: (ctx, index) {
+                        final ip = ipList[index];
+                        final isSelected = selectedIndices.contains(index);
+                        return Padding(
+                          padding: const EdgeInsets.symmetric(vertical: 6),
+                          child: Row(
+                            children: [
+                              // 체크박스
+                              SizedBox(
+                                width: 24,
+                                height: 24,
+                                child: Checkbox(
+                                  value: isSelected,
+                                  onChanged: isOptFixed
+                                      ? null
+                                      : (val) {
+                                          setState(() {
+                                            if (val == true) {
+                                              selectedIndices.add(index);
+                                            } else {
+                                              selectedIndices.remove(index);
+                                            }
+                                          });
+                                        },
+                                  shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(4),
+                                  ),
+                                  side: const BorderSide(
+                                      color: Color(0xFFE0E0E0)),
+                                  activeColor: const Color(0xFF4B7BF5),
+                                ),
+                              ),
+                              const SizedBox(width: 12),
+                              // IP 주소
+                              Expanded(
+                                child: Text(
+                                  ip,
+                                  style: const TextStyle(
+                                    fontSize: 14,
+                                    color: Color(0xFF454447),
+                                  ),
+                                ),
+                              ),
+                              // 수정 아이콘
+                              if (!isOptFixed)
+                                _HoverIcon(
+                                  assetPath:
+                                      'assets/icons/ip-white-list-edit.svg',
+                                  normalColor: const Color(0xFF8F8E95),
+                                  hoverColor: const Color(0xFF5F71FF),
+                                  onTap: () {
+                                    setState(() {
+                                      editingIndex = index;
+                                      editController.text = ip;
+                                      editMsg = "";
+                                    });
+                                  },
+                                ),
+                              // 삭제 아이콘
+                              if (!isOptFixed)
+                                _HoverIcon(
+                                  assetPath:
+                                      'assets/icons/ip-white-list-del.svg',
+                                  normalColor: const Color(0xFFFE3E3E),
+                                  hoverColor: const Color(0xFF5F71FF),
+                                  onTap: () {
+                                    setState(() {
+                                      ipList.removeAt(index);
+                                      selectedIndices.remove(index);
+                                      // 인덱스 조정
+                                      selectedIndices = selectedIndices
+                                          .map((i) => i > index ? i - 1 : i)
+                                          .toSet();
+                                    });
+                                  },
+                                ),
+                            ],
+                          ),
+                        );
+                      },
+                    ),
+            ),
+            const SizedBox(height: 24),
+
+            // 하단 버튼
+            Row(
+              children: [
+                Expanded(
+                  child: StyledOutlinedButton(
+                    label: translate("Cancel"),
+                    onPressed: close,
+                  ),
+                ),
+                if (!isOptFixed) ...[
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: StyledCompactButton(
+                      label: translate("Save"),
+                      onPressed: () async {
+                        final newWhiteList = ipList.isEmpty
+                            ? defaultOptionWhitelist
+                            : ipList.join(',');
+                        await bind.mainSetOption(
+                            key: kOptionWhitelist, value: newWhiteList);
+                        callback?.call();
+                        close();
+                      },
+                      fillWidth: true,
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ],
+        ),
+      ),
       onCancel: close,
     );
   });
@@ -295,36 +620,47 @@ Future<String> changeDirectAccessPort(
           Row(
             children: [
               Expanded(
-                child: TextField(
-                        maxLines: null,
-                        keyboardType: TextInputType.number,
-                        decoration: InputDecoration(
-                            hintText: '21118',
-                            isCollapsed: true,
-                            prefix: Text('$currentIP : '),
-                            suffix: IconButton(
-                                padding: EdgeInsets.zero,
-                                icon: const Icon(Icons.clear, size: 16),
-                                onPressed: () => controller.clear())),
-                        inputFormatters: [
-                          FilteringTextInputFormatter.allow(RegExp(
-                              r'^([0-9]|[1-9]\d|[1-9]\d{2}|[1-9]\d{3}|[1-5]\d{4}|6[0-4]\d{3}|65[0-4]\d{2}|655[0-2]\d|6553[0-5])$')),
-                        ],
-                        controller: controller,
-                        autofocus: true)
-                    .workaroundFreezeLinuxMint(),
+                child: StyledTextField(
+                  controller: controller,
+                  maxLines: null,
+                  keyboardType: TextInputType.number,
+                  hintText: '21118',
+                  isCollapsed: true,
+                  prefix: Text('$currentIP : '),
+                  suffix: IconButton(
+                    padding: EdgeInsets.zero,
+                    icon: const Icon(Icons.clear, size: 16),
+                    onPressed: () => controller.clear(),
+                  ),
+                  inputFormatters: [
+                    FilteringTextInputFormatter.allow(RegExp(
+                        r'^([0-9]|[1-9]\d|[1-9]\d{2}|[1-9]\d{3}|[1-5]\d{4}|6[0-4]\d{3}|65[0-4]\d{2}|655[0-2]\d|6553[0-5])$')),
+                  ],
+                  autofocus: true,
+                ),
               ),
             ],
           ),
         ],
       ),
       actions: [
-        dialogButton("Cancel", onPressed: close, isOutline: true),
-        dialogButton("OK", onPressed: () async {
-          await bind.mainSetOption(
-              key: kOptionDirectAccessPort, value: controller.text);
-          close();
-        }),
+        SizedBox(
+          width: double.infinity,
+          child: Row(
+            children: [
+              Expanded(
+                  child:
+                      dialogButton("Cancel", onPressed: close, isOutline: true)),
+              const SizedBox(width: 12),
+              Expanded(
+                  child: dialogButton("OK", onPressed: () async {
+                await bind.mainSetOption(
+                    key: kOptionDirectAccessPort, value: controller.text);
+                close();
+              })),
+            ],
+          ),
+        ),
       ],
       onCancel: close,
     );
@@ -344,35 +680,46 @@ Future<String> changeAutoDisconnectTimeout(String old) async {
           Row(
             children: [
               Expanded(
-                child: TextField(
-                        maxLines: null,
-                        keyboardType: TextInputType.number,
-                        decoration: InputDecoration(
-                            hintText: '10',
-                            isCollapsed: true,
-                            suffix: IconButton(
-                                padding: EdgeInsets.zero,
-                                icon: const Icon(Icons.clear, size: 16),
-                                onPressed: () => controller.clear())),
-                        inputFormatters: [
-                          FilteringTextInputFormatter.allow(RegExp(
-                              r'^([0-9]|[1-9]\d|[1-9]\d{2}|[1-9]\d{3}|[1-5]\d{4}|6[0-4]\d{3}|65[0-4]\d{2}|655[0-2]\d|6553[0-5])$')),
-                        ],
-                        controller: controller,
-                        autofocus: true)
-                    .workaroundFreezeLinuxMint(),
+                child: StyledTextField(
+                  controller: controller,
+                  maxLines: null,
+                  keyboardType: TextInputType.number,
+                  hintText: '10',
+                  isCollapsed: true,
+                  suffix: IconButton(
+                    padding: EdgeInsets.zero,
+                    icon: const Icon(Icons.clear, size: 16),
+                    onPressed: () => controller.clear(),
+                  ),
+                  inputFormatters: [
+                    FilteringTextInputFormatter.allow(RegExp(
+                        r'^([0-9]|[1-9]\d|[1-9]\d{2}|[1-9]\d{3}|[1-5]\d{4}|6[0-4]\d{3}|65[0-4]\d{2}|655[0-2]\d|6553[0-5])$')),
+                  ],
+                  autofocus: true,
+                ),
               ),
             ],
           ),
         ],
       ),
       actions: [
-        dialogButton("Cancel", onPressed: close, isOutline: true),
-        dialogButton("OK", onPressed: () async {
-          await bind.mainSetOption(
-              key: kOptionAutoDisconnectTimeout, value: controller.text);
-          close();
-        }),
+        SizedBox(
+          width: double.infinity,
+          child: Row(
+            children: [
+              Expanded(
+                  child:
+                      dialogButton("Cancel", onPressed: close, isOutline: true)),
+              const SizedBox(width: 12),
+              Expanded(
+                  child: dialogButton("OK", onPressed: () async {
+                await bind.mainSetOption(
+                    key: kOptionAutoDisconnectTimeout, value: controller.text);
+                close();
+              })),
+            ],
+          ),
+        ),
       ],
       onCancel: close,
     );
@@ -420,39 +767,21 @@ class DialogTextField extends StatelessWidget {
     return Row(
       children: [
         Expanded(
-          child: Column(
-            children: [
-              TextField(
-                decoration: InputDecoration(
-                  labelText: title,
-                  hintText: hintText,
-                  prefixIcon: prefixIcon,
-                  suffixIcon: suffixIcon,
-                  helperText: helperText,
-                  helperMaxLines: 8,
-                ),
-                controller: controller,
-                focusNode: focusNode,
-                autofocus: true,
-                obscureText: obscureText,
-                keyboardType: keyboardType,
-                inputFormatters: inputFormatters,
-                maxLength: maxLength,
-              ),
-              if (errorText != null)
-                Align(
-                  alignment: Alignment.centerLeft,
-                  child: SelectableText(
-                    errorText!,
-                    style: TextStyle(
-                      color: Theme.of(context).colorScheme.error,
-                      fontSize: 12,
-                    ),
-                    textAlign: TextAlign.left,
-                  ).paddingOnly(top: 8, left: 12),
-                ),
-            ],
-          ).workaroundFreezeLinuxMint(),
+          child: StyledTextField(
+            controller: controller,
+            focusNode: focusNode,
+            labelText: title,
+            hintText: hintText,
+            errorText: errorText,
+            helperText: helperText,
+            prefixIcon: prefixIcon,
+            suffixIcon: suffixIcon,
+            obscureText: obscureText,
+            keyboardType: keyboardType,
+            inputFormatters: inputFormatters,
+            maxLength: maxLength,
+            autofocus: true,
+          ),
         ),
       ],
     ).paddingSymmetric(vertical: 4.0);
@@ -761,27 +1090,28 @@ class _PasswordWidgetState extends State<PasswordWidget> {
 
   @override
   Widget build(BuildContext context) {
-    return DialogTextField(
-      title: translate(widget.title ?? DialogTextField.kPasswordTitle),
-      hintText: translate(widget.hintText ?? 'Enter your password'),
+    return StyledTextField(
       controller: widget.controller,
-      prefixIcon: DialogTextField.kPasswordIcon,
+      focusNode: _focusNode,
+      obscureText: !_passwordVisible,
+      maxLength: widget.maxLength,
+      hintText: translate(widget.hintText ?? 'Enter your password'),
+      errorText: widget.errorText,
+      autofocus: widget.autoFocus,
       suffixIcon: IconButton(
         icon: Icon(
-            // Based on passwordVisible state choose the icon
-            _passwordVisible ? Icons.visibility : Icons.visibility_off,
-            color: MyTheme.lightTheme.primaryColor),
+          _passwordVisible
+              ? Icons.visibility_outlined
+              : Icons.visibility_off_outlined,
+          size: 20,
+          color: Colors.grey[500],
+        ),
         onPressed: () {
-          // Update the state i.e. toggle the state of passwordVisible variable
           setState(() {
             _passwordVisible = !_passwordVisible;
           });
         },
       ),
-      obscureText: !_passwordVisible,
-      errorText: widget.errorText,
-      focusNode: _focusNode,
-      maxLength: widget.maxLength,
     );
   }
 }
@@ -805,14 +1135,17 @@ void wrongPasswordDialog(SessionID sessionId,
         onSubmit: submit,
         onCancel: cancel,
         actions: [
-          dialogButton(
-            'Cancel',
-            onPressed: cancel,
-            isOutline: true,
-          ),
-          dialogButton(
-            'Retry',
-            onPressed: submit,
+          SizedBox(
+            width: double.infinity,
+            child: Row(
+              children: [
+                Expanded(
+                    child: dialogButton('Cancel',
+                        onPressed: cancel, isOutline: true)),
+                const SizedBox(width: 12),
+                Expanded(child: dialogButton('Retry', onPressed: submit)),
+              ],
+            ),
           ),
         ]);
   });
@@ -948,13 +1281,23 @@ _connectDialog(
       bool remember,
       ValueChanged<bool?>? onChanged,
     ) {
-      return CheckboxListTile(
-        contentPadding: const EdgeInsets.all(0),
-        dense: true,
-        controlAffinity: ListTileControlAffinity.leading,
-        title: Text(desc),
-        value: remember,
-        onChanged: onChanged,
+      return Padding(
+        padding: const EdgeInsets.only(top: 8),
+        child: GestureDetector(
+          onTap: () => onChanged?.call(!remember),
+          child: Row(
+            children: [
+              StyledCheckbox(
+                value: remember,
+                onChanged: onChanged,
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(desc, style: const TextStyle(fontSize: 14)),
+              ),
+            ],
+          ),
+        ),
       );
     }
 
@@ -1007,7 +1350,6 @@ _connectDialog(
       }
       return Column(
         children: [
-          descWidget(translate('verify_rustdesk_password_tip')),
           PasswordWidget(
             controller: passwordController,
             autoFocus: osUsernameController == null,
@@ -1026,12 +1368,12 @@ _connectDialog(
     }
 
     return CustomAlertDialog(
-      title: Row(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Icon(Icons.password_rounded, color: MyTheme.accent),
-          Text(translate('Password Required')).paddingOnly(left: 10),
-        ],
+      title: Text(
+        translate('Password Required'),
+        style: const TextStyle(
+          fontSize: 18,
+          fontWeight: FontWeight.bold,
+        ),
       ),
       content: Column(mainAxisSize: MainAxisSize.min, children: [
         osAccountWidget(),
@@ -1041,16 +1383,25 @@ _connectDialog(
         passwdWidget(),
       ]),
       actions: [
-        dialogButton(
-          'Cancel',
-          icon: Icon(Icons.close_rounded),
-          onPressed: cancel,
-          isOutline: true,
-        ),
-        dialogButton(
-          'OK',
-          icon: Icon(Icons.done_rounded),
-          onPressed: submit,
+        SizedBox(
+          width: double.infinity,
+          child: Row(
+            children: [
+              Expanded(
+                child: StyledOutlinedButton(
+                  label: translate('Cancel'),
+                  onPressed: cancel,
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: StyledPrimaryButton(
+                  label: translate('OK'),
+                  onPressed: submit,
+                ),
+              ),
+            ],
+          ),
         ),
       ],
       onSubmit: submit,
@@ -1230,17 +1581,19 @@ void showRequestElevationDialog(
       title: Text(translate('Request Elevation')),
       content: content,
       actions: [
-        dialogButton(
-          'Cancel',
-          icon: Icon(Icons.close_rounded),
-          onPressed: close,
-          isOutline: true,
+        Row(
+          children: [
+            Expanded(
+                child: dialogButton('Cancel',
+                    icon: Icon(Icons.close_rounded),
+                    onPressed: close,
+                    isOutline: true)),
+            const SizedBox(width: 12),
+            Expanded(
+                child: dialogButton('OK',
+                    icon: Icon(Icons.done_rounded), onPressed: submit)),
+          ],
         ),
-        dialogButton(
-          'OK',
-          icon: Icon(Icons.done_rounded),
-          onPressed: submit,
-        )
       ],
       onSubmit: submit,
       onCancel: close,
@@ -1270,8 +1623,15 @@ void showOnBlockDialog(
       content: msgboxContent(type, title,
           "${translate(text)}${type.contains('uac') ? '\n' : '\n\n'}${translate('request_elevation_tip')}"),
       actions: [
-        dialogButton('Wait', onPressed: close, isOutline: true),
-        dialogButton('Request Elevation', onPressed: submit),
+        Row(
+          children: [
+            Expanded(
+                child: dialogButton('Wait', onPressed: close, isOutline: true)),
+            const SizedBox(width: 12),
+            Expanded(
+                child: dialogButton('Request Elevation', onPressed: submit)),
+          ],
+        ),
       ],
       onSubmit: submit,
       onCancel: close,
@@ -1291,10 +1651,19 @@ void showElevationError(SessionID sessionId, String type, String title,
       title: null,
       content: msgboxContent(type, title, text),
       actions: [
-        dialogButton('Cancel', onPressed: () {
-          close();
-        }, isOutline: true),
-        if (text != 'No permission') dialogButton('Retry', onPressed: submit),
+        Row(
+          children: [
+            Expanded(
+              child: dialogButton('Cancel', onPressed: () {
+                close();
+              }, isOutline: true),
+            ),
+            if (text != 'No permission') ...[
+              const SizedBox(width: 12),
+              Expanded(child: dialogButton('Retry', onPressed: submit)),
+            ],
+          ],
+        ),
       ],
       onSubmit: submit,
       onCancel: close,
@@ -1325,25 +1694,46 @@ void showRestartRemoteDevice(PeerInfo pi, String id, SessionID sessionId,
     OverlayDialogManager dialogManager) async {
   final res = await dialogManager
       .show<bool>((setState, close, context) => CustomAlertDialog(
-            title: Row(children: [
-              Icon(Icons.warning_rounded, color: Colors.redAccent, size: 28),
-              Flexible(
-                  child: Text(translate("Restart remote device"))
-                      .paddingOnly(left: 10)),
-            ]),
-            content: Text(
-                "${translate('Are you sure you want to restart')} \n${pi.username}@${pi.hostname}($id) ?"),
-            actions: [
-              dialogButton(
-                "Cancel",
-                icon: Icon(Icons.close_rounded),
-                onPressed: close,
-                isOutline: true,
+            title: Text(
+              translate("Restart remote device"),
+              style: const TextStyle(
+                fontSize: 18,
+                fontWeight: FontWeight.bold,
               ),
-              dialogButton(
-                "OK",
-                icon: Icon(Icons.done_rounded),
-                onPressed: () => close(true),
+            ),
+            content: Text(
+              translate('Are you sure you want to restart?'),
+              style: const TextStyle(fontSize: 14),
+            ),
+            actions: [
+              Row(
+                children: [
+                  Expanded(
+                    child: StyledOutlinedButton(
+                      label: translate('Cancel'),
+                      onPressed: close,
+                      padding: const EdgeInsets.symmetric(vertical: 14),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: ElevatedButton(
+                      onPressed: () => close(true),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: MyTheme.accent,
+                        padding: const EdgeInsets.symmetric(vertical: 14),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                      ),
+                      child: Text(
+                        translate('OK'),
+                        style:
+                            const TextStyle(color: Colors.white, fontSize: 16),
+                      ),
+                    ),
+                  ),
+                ],
               ),
             ],
             onCancel: close,
@@ -1399,32 +1789,47 @@ showSetOSPassword(
         mainAxisSize: MainAxisSize.min,
         children: [
           PasswordWidget(controller: controller),
-          CheckboxListTile(
-            contentPadding: const EdgeInsets.all(0),
-            dense: true,
-            controlAffinity: ListTileControlAffinity.leading,
-            title: Text(
-              translate('Auto Login'),
+          Padding(
+            padding: const EdgeInsets.only(top: 8),
+            child: Row(
+              children: [
+                SizedBox(
+                  width: 24,
+                  height: 24,
+                  child: Checkbox(
+                    value: autoLogin,
+                    onChanged: (v) {
+                      if (v == null) return;
+                      setState(() => autoLogin = v);
+                    },
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: GestureDetector(
+                    onTap: () => setState(() => autoLogin = !autoLogin),
+                    child: Text(translate('Auto Login'),
+                        style: const TextStyle(fontSize: 14)),
+                  ),
+                ),
+              ],
             ),
-            value: autoLogin,
-            onChanged: (v) {
-              if (v == null) return;
-              setState(() => autoLogin = v);
-            },
           ),
         ],
       ),
       actions: [
-        dialogButton(
-          "Cancel",
-          icon: Icon(Icons.close_rounded),
-          onPressed: closeWithCallback,
-          isOutline: true,
-        ),
-        dialogButton(
-          "OK",
-          icon: Icon(Icons.done_rounded),
-          onPressed: submit,
+        Row(
+          children: [
+            Expanded(
+                child: dialogButton("Cancel",
+                    icon: Icon(Icons.close_rounded),
+                    onPressed: closeWithCallback,
+                    isOutline: true)),
+            const SizedBox(width: 12),
+            Expanded(
+                child: dialogButton("OK",
+                    icon: Icon(Icons.done_rounded), onPressed: submit)),
+          ],
         ),
       ],
       onSubmit: submit,
@@ -1500,16 +1905,18 @@ showSetOSAccount(
         ],
       ),
       actions: [
-        dialogButton(
-          "Cancel",
-          icon: Icon(Icons.close_rounded),
-          onPressed: close,
-          isOutline: true,
-        ),
-        dialogButton(
-          "OK",
-          icon: Icon(Icons.done_rounded),
-          onPressed: submit,
+        Row(
+          children: [
+            Expanded(
+                child: dialogButton("Cancel",
+                    icon: Icon(Icons.close_rounded),
+                    onPressed: close,
+                    isOutline: true)),
+            const SizedBox(width: 12),
+            Expanded(
+                child: dialogButton("OK",
+                    icon: Icon(Icons.done_rounded), onPressed: submit)),
+          ],
         ),
       ],
       onSubmit: submit,
@@ -1545,23 +1952,18 @@ Widget buildNoteTextField({
     },
   );
 
-  return TextField(
+  return StyledTextField(
+    controller: controller,
+    focusNode: focusNode,
     autofocus: true,
     keyboardType: TextInputType.multiline,
     textInputAction: TextInputAction.newline,
-    decoration: InputDecoration(
-      hintText: translate('input note here'),
-      border: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(8),
-      ),
-      contentPadding: EdgeInsets.all(12),
-    ),
+    hintText: translate('input note here'),
+    contentPadding: const EdgeInsets.all(12),
     minLines: 5,
     maxLines: null,
     maxLength: 256,
-    controller: controller,
-    focusNode: focusNode,
-  ).workaroundFreezeLinuxMint();
+  );
 }
 
 showAuditDialog(FFI ffi) async {
@@ -1584,8 +1986,15 @@ showAuditDialog(FFI ffi) async {
             onEscape: close,
           )),
       actions: [
-        dialogButton('Cancel', onPressed: close, isOutline: true),
-        dialogButton('OK', onPressed: submit)
+        Row(
+          children: [
+            Expanded(
+                child:
+                    dialogButton('Cancel', onPressed: close, isOutline: true)),
+            const SizedBox(width: 12),
+            Expanded(child: dialogButton('OK', onPressed: submit)),
+          ],
+        ),
       ],
       onSubmit: submit,
       onCancel: close,
@@ -1822,8 +2231,13 @@ void showConfirmSwitchSidesDialog(
       content: msgboxContent('info', 'Switch Sides',
           'Please confirm if you want to share your desktop?'),
       actions: [
-        dialogButton('Cancel', onPressed: close, isOutline: true),
-        dialogButton('OK', onPressed: submit),
+        Row(
+          children: [
+            Expanded(child: dialogButton('Cancel', onPressed: close, isOutline: true)),
+            const SizedBox(width: 12),
+            Expanded(child: dialogButton('OK', onPressed: submit)),
+          ],
+        ),
       ],
       onSubmit: submit,
       onCancel: close,
@@ -1936,32 +2350,33 @@ void deleteConfirmDialog(Function onSubmit, String title) async {
       }
 
       return CustomAlertDialog(
-        title: Row(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(
-              Icons.delete_rounded,
-              color: Colors.red,
-            ),
-            Expanded(
-              child: Text(title, overflow: TextOverflow.ellipsis).paddingOnly(
-                left: 10,
-              ),
-            ),
-          ],
+        title: Text(
+          title,
+          style: MyTheme.dialogTitleStyle,
         ),
-        content: SizedBox.shrink(),
+        content: Text(translate('Are you sure you want to delete this device?')),
         actions: [
-          dialogButton(
-            "Cancel",
-            icon: Icon(Icons.close_rounded),
-            onPressed: close,
-            isOutline: true,
-          ),
-          dialogButton(
-            "OK",
-            icon: Icon(Icons.done_rounded),
-            onPressed: submit,
+          SizedBox(
+            width: double.infinity,
+            child: Row(
+              children: [
+                Expanded(
+                  child: StyledOutlinedButton(
+                    label: translate('Cancel'),
+                    onPressed: close,
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: StyledPrimaryButton(
+                    label: translate('OK'),
+                    onPressed: submit,
+                    backgroundColor: const Color(0xFFFE3E3E),
+                    hoverBorderColor: const Color(0xFFFE3E3E),
+                  ),
+                ),
+              ],
+            ),
           ),
         ],
         onSubmit: submit,
@@ -2015,8 +2430,18 @@ void editAbTagDialog(
         ],
       ),
       actions: [
-        dialogButton("Cancel", onPressed: close, isOutline: true),
-        dialogButton("OK", onPressed: submit),
+        SizedBox(
+          width: double.infinity,
+          child: Row(
+            children: [
+              Expanded(
+                  child:
+                      dialogButton("Cancel", onPressed: close, isOutline: true)),
+              const SizedBox(width: 12),
+              Expanded(child: dialogButton("OK", onPressed: submit)),
+            ],
+          ),
+        ),
       ],
       onSubmit: submit,
       onCancel: close,
@@ -2043,23 +2468,31 @@ void editAbPeerNoteDialog(String id) {
       content: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          TextField(
+          StyledTextField(
             controller: controller,
             autofocus: true,
             maxLines: 3,
             minLines: 1,
             maxLength: 300,
-            decoration: InputDecoration(
-              labelText: translate('Note'),
-            ),
-          ).workaroundFreezeLinuxMint(),
+            labelText: translate('Note'),
+          ),
           // NOT use Offstage to wrap LinearProgressIndicator
           if (isInProgress) const LinearProgressIndicator(),
         ],
       ),
       actions: [
-        dialogButton("Cancel", onPressed: close, isOutline: true),
-        dialogButton("OK", onPressed: submit),
+        SizedBox(
+          width: double.infinity,
+          child: Row(
+            children: [
+              Expanded(
+                  child:
+                      dialogButton("Cancel", onPressed: close, isOutline: true)),
+              const SizedBox(width: 12),
+              Expanded(child: dialogButton("OK", onPressed: submit)),
+            ],
+          ),
+        ),
       ],
       onSubmit: submit,
       onCancel: close,
@@ -2120,16 +2553,18 @@ void renameDialog(
         ],
       ),
       actions: [
-        dialogButton(
-          "Cancel",
-          icon: Icon(Icons.close_rounded),
-          onPressed: cancel,
-          isOutline: true,
-        ),
-        dialogButton(
-          "OK",
-          icon: Icon(Icons.done_rounded),
-          onPressed: submit,
+        Row(
+          children: [
+            Expanded(
+                child: dialogButton("Cancel",
+                    icon: Icon(Icons.close_rounded),
+                    onPressed: cancel,
+                    isOutline: true)),
+            const SizedBox(width: 12),
+            Expanded(
+                child: dialogButton("OK",
+                    icon: Icon(Icons.done_rounded), onPressed: submit)),
+          ],
         ),
       ],
       onSubmit: submit,
@@ -2165,13 +2600,11 @@ void changeBot({Function()? callback}) async {
       }
     }
 
-    final codeField = TextField(
-      autofocus: true,
+    final codeField = StyledTextField(
       controller: controller,
-      decoration: InputDecoration(
-        hintText: translate('Token'),
-      ),
-    ).workaroundFreezeLinuxMint();
+      autofocus: true,
+      hintText: translate('Token'),
+    );
 
     return CustomAlertDialog(
       title: Text(translate("Telegram bot")),
@@ -2188,10 +2621,17 @@ void changeBot({Function()? callback}) async {
         ],
       ),
       actions: [
-        dialogButton("Cancel", onPressed: close, isOutline: true),
-        loading
-            ? CircularProgressIndicator()
-            : dialogButton("OK", onPressed: onVerify),
+        Row(
+          children: [
+            Expanded(child: dialogButton("Cancel", onPressed: close, isOutline: true)),
+            const SizedBox(width: 12),
+            Expanded(
+              child: loading
+                  ? const Center(child: CircularProgressIndicator())
+                  : dialogButton("OK", onPressed: onVerify),
+            ),
+          ],
+        ),
       ],
       onCancel: close,
     );
@@ -2257,8 +2697,18 @@ void change2fa({Function()? callback}) async {
         ],
       ),
       actions: [
-        dialogButton("Cancel", onPressed: close, isOutline: true),
-        dialogButton("OK", onPressed: getOnSubmit()),
+        SizedBox(
+          width: double.infinity,
+          child: Row(
+            children: [
+              Expanded(
+                  child:
+                      dialogButton("Cancel", onPressed: close, isOutline: true)),
+              const SizedBox(width: 12),
+              Expanded(child: dialogButton("OK", onPressed: getOnSubmit())),
+            ],
+          ),
+        ),
       ],
       onCancel: close,
     );
@@ -2293,16 +2743,31 @@ void enter2FaDialog(
       onChanged: () => submitReady.value = codeField.isReady,
     );
 
-    final trustField = Obx(() => CheckboxListTile(
-          contentPadding: const EdgeInsets.all(0),
-          dense: true,
-          controlAffinity: ListTileControlAffinity.leading,
-          title: Text(translate("Trust this device")),
-          value: trustThisDevice.value,
-          onChanged: (value) {
-            if (value == null) return;
-            trustThisDevice.value = value;
-          },
+    final trustField = Obx(() => Padding(
+          padding: const EdgeInsets.only(top: 8),
+          child: Row(
+            children: [
+              SizedBox(
+                width: 24,
+                height: 24,
+                child: Checkbox(
+                  value: trustThisDevice.value,
+                  onChanged: (value) {
+                    if (value == null) return;
+                    trustThisDevice.value = value;
+                  },
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: GestureDetector(
+                  onTap: () => trustThisDevice.value = !trustThisDevice.value,
+                  child: Text(translate("Trust this device"),
+                      style: const TextStyle(fontSize: 14)),
+                ),
+              ),
+            ],
+          ),
         ));
 
     return CustomAlertDialog(
@@ -2315,15 +2780,24 @@ void enter2FaDialog(
           ],
         ),
         actions: [
-          dialogButton('Cancel',
-              onPressed: cancel,
-              isOutline: true,
-              style: TextStyle(
-                  color: Theme.of(context).textTheme.bodyMedium?.color)),
-          Obx(() => dialogButton(
-                'OK',
-                onPressed: submitReady.isTrue ? submit : null,
-              )),
+          Row(
+            children: [
+              Expanded(
+                child: dialogButton('Cancel',
+                    onPressed: cancel,
+                    isOutline: true,
+                    style: TextStyle(
+                        color: Theme.of(context).textTheme.bodyMedium?.color)),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Obx(() => dialogButton(
+                      'OK',
+                      onPressed: submitReady.isTrue ? submit : null,
+                    )),
+              ),
+            ],
+          ),
         ],
         onSubmit: submit,
         onCancel: cancel);
@@ -2476,16 +2950,18 @@ void addPeersToAbDialog(
             ],
           )),
       actions: [
-        dialogButton(
-          "Cancel",
-          icon: Icon(Icons.close_rounded),
-          onPressed: cancel,
-          isOutline: true,
-        ),
-        dialogButton(
-          "OK",
-          icon: Icon(Icons.done_rounded),
-          onPressed: submit,
+        Row(
+          children: [
+            Expanded(
+                child: dialogButton("Cancel",
+                    icon: Icon(Icons.close_rounded),
+                    onPressed: cancel,
+                    isOutline: true)),
+            const SizedBox(width: 12),
+            Expanded(
+                child: dialogButton("OK",
+                    icon: Icon(Icons.done_rounded), onPressed: submit)),
+          ],
         ),
       ],
       onSubmit: submit,
@@ -2530,23 +3006,21 @@ void setSharedAbPasswordDialog(String abName, Peer peer) {
         ],
       ),
       content: Obx(() => Column(children: [
-            TextField(
+            StyledTextField(
               controller: controller,
               autofocus: true,
               obscureText: !passwordVisible,
-              decoration: InputDecoration(
-                suffixIcon: IconButton(
-                  icon: Icon(
-                      passwordVisible ? Icons.visibility : Icons.visibility_off,
-                      color: MyTheme.lightTheme.primaryColor),
-                  onPressed: () {
-                    setState(() {
-                      passwordVisible = !passwordVisible;
-                    });
-                  },
-                ),
+              suffixIcon: IconButton(
+                icon: Icon(
+                    passwordVisible ? Icons.visibility : Icons.visibility_off,
+                    color: MyTheme.lightTheme.primaryColor),
+                onPressed: () {
+                  setState(() {
+                    passwordVisible = !passwordVisible;
+                  });
+                },
               ),
-            ).workaroundFreezeLinuxMint(),
+            ),
             if (!gFFI.abModel.current.isPersonal())
               Row(children: [
                 Icon(Icons.info, color: Colors.amber).marginOnly(right: 4),
@@ -2559,26 +3033,39 @@ void setSharedAbPasswordDialog(String abName, Peer peer) {
             isInProgress.value ? const LinearProgressIndicator() : Offstage()
           ])),
       actions: [
-        dialogButton(
-          "Cancel",
-          icon: Icon(Icons.close_rounded),
-          onPressed: cancel,
-          isOutline: true,
+        Row(
+          children: [
+            Expanded(
+              child: dialogButton(
+                "Cancel",
+                icon: Icon(Icons.close_rounded),
+                onPressed: cancel,
+                isOutline: true,
+              ),
+            ),
+            if (peer.password.isNotEmpty) ...[
+              const SizedBox(width: 8),
+              Expanded(
+                child: dialogButton(
+                  "Remove",
+                  icon: Icon(Icons.delete_outline_rounded),
+                  onPressed: () => change(''),
+                  buttonStyle: ButtonStyle(
+                      backgroundColor: MaterialStatePropertyAll(Colors.red)),
+                ),
+              ),
+            ],
+            const SizedBox(width: 8),
+            Expanded(
+              child: Obx(() => dialogButton(
+                    "OK",
+                    icon: Icon(Icons.done_rounded),
+                    onPressed:
+                        isInputEmpty.value ? null : () => change(controller.text),
+                  )),
+            ),
+          ],
         ),
-        if (peer.password.isNotEmpty)
-          dialogButton(
-            "Remove",
-            icon: Icon(Icons.delete_outline_rounded),
-            onPressed: () => change(''),
-            buttonStyle: ButtonStyle(
-                backgroundColor: MaterialStatePropertyAll(Colors.red)),
-          ),
-        Obx(() => dialogButton(
-              "OK",
-              icon: Icon(Icons.done_rounded),
-              onPressed:
-                  isInputEmpty.value ? null : () => change(controller.text),
-            )),
       ],
       onSubmit: isInputEmpty.value ? null : () => change(controller.text),
       onCancel: cancel,
@@ -2605,8 +3092,15 @@ void CommonConfirmDialog(OverlayDialogManager dialogManager, String content,
         ],
       ).marginOnly(bottom: 12),
       actions: [
-        dialogButton(translate("Cancel"), onPressed: close, isOutline: true),
-        dialogButton(translate("OK"), onPressed: submit),
+        Row(
+          children: [
+            Expanded(
+                child: dialogButton(translate("Cancel"),
+                    onPressed: close, isOutline: true)),
+            const SizedBox(width: 12),
+            Expanded(child: dialogButton(translate("OK"), onPressed: submit)),
+          ],
+        ),
       ],
       onSubmit: submit,
       onCancel: close,
@@ -2665,8 +3159,15 @@ void changeUnlockPinDialog(String oldPin, Function() callback) {
         ],
       ).marginOnly(bottom: 12),
       actions: [
-        dialogButton(translate("Cancel"), onPressed: close, isOutline: true),
-        dialogButton(translate("OK"), onPressed: submit),
+        Row(
+          children: [
+            Expanded(
+                child: dialogButton(translate("Cancel"),
+                    onPressed: close, isOutline: true)),
+            const SizedBox(width: 12),
+            Expanded(child: dialogButton(translate("OK"), onPressed: submit)),
+          ],
+        ),
       ],
       onSubmit: submit,
       onCancel: close,
@@ -2703,8 +3204,15 @@ void checkUnlockPinDialog(String correctPin, Function() passCallback) {
         ],
       ).marginOnly(bottom: 12),
       actions: [
-        dialogButton(translate("Cancel"), onPressed: close, isOutline: true),
-        dialogButton(translate("OK"), onPressed: submit),
+        Row(
+          children: [
+            Expanded(
+                child: dialogButton(translate("Cancel"),
+                    onPressed: close, isOutline: true)),
+            const SizedBox(width: 12),
+            Expanded(child: dialogButton(translate("OK"), onPressed: submit)),
+          ],
+        ),
       ],
       onSubmit: submit,
       onCancel: close,
@@ -2740,19 +3248,26 @@ void manageTrustedDeviceDialog() async {
       title: Text(translate("Manage trusted devices")),
       content: trustedDevicesTable(trustedDevices, selectedDevices),
       actions: [
-        Obx(() => dialogButton(translate("Delete"),
-                onPressed: selectedDevices.isEmpty
-                    ? null
-                    : () {
-                        confrimDeleteTrustedDevicesDialog(
-                          trustedDevices,
-                          selectedDevices,
-                        );
-                      },
-                isOutline: false)
-            .marginOnly(top: 12)),
-        dialogButton(translate("Close"), onPressed: close, isOutline: true)
-            .marginOnly(top: 12),
+        Row(
+          children: [
+            Expanded(
+              child: dialogButton(translate("Close"), onPressed: close, isOutline: true),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Obx(() => dialogButton(translate("Delete"),
+                      onPressed: selectedDevices.isEmpty
+                          ? null
+                          : () {
+                              confrimDeleteTrustedDevicesDialog(
+                                trustedDevices,
+                                selectedDevices,
+                              );
+                            },
+                      isOutline: false)),
+            ),
+          ],
+        ),
       ],
       onCancel: close,
     );
@@ -2864,4 +3379,95 @@ Widget trustedDevicesTable(
           }).toList(),
         )),
   );
+}
+
+/// 호버 시 색상 변경되는 텍스트 위젯
+class _HoverText extends StatefulWidget {
+  final String text;
+  final Color normalColor;
+  final Color hoverColor;
+  final VoidCallback onTap;
+  final double fontSize;
+
+  const _HoverText({
+    required this.text,
+    required this.normalColor,
+    required this.hoverColor,
+    required this.onTap,
+    this.fontSize = 13,
+  });
+
+  @override
+  State<_HoverText> createState() => _HoverTextState();
+}
+
+class _HoverTextState extends State<_HoverText> {
+  bool _isHovered = false;
+
+  @override
+  Widget build(BuildContext context) {
+    return MouseRegion(
+      cursor: SystemMouseCursors.click,
+      onEnter: (_) => setState(() => _isHovered = true),
+      onExit: (_) => setState(() => _isHovered = false),
+      child: GestureDetector(
+        onTap: widget.onTap,
+        child: Text(
+          widget.text,
+          style: TextStyle(
+            fontSize: widget.fontSize,
+            color: _isHovered ? widget.hoverColor : widget.normalColor,
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// 호버 시 색상 변경되는 아이콘 위젯
+class _HoverIcon extends StatefulWidget {
+  final String assetPath;
+  final Color normalColor;
+  final Color hoverColor;
+  final VoidCallback onTap;
+  final double size;
+
+  const _HoverIcon({
+    required this.assetPath,
+    required this.normalColor,
+    required this.hoverColor,
+    required this.onTap,
+    this.size = 20,
+  });
+
+  @override
+  State<_HoverIcon> createState() => _HoverIconState();
+}
+
+class _HoverIconState extends State<_HoverIcon> {
+  bool _isHovered = false;
+
+  @override
+  Widget build(BuildContext context) {
+    return MouseRegion(
+      cursor: SystemMouseCursors.click,
+      onEnter: (_) => setState(() => _isHovered = true),
+      onExit: (_) => setState(() => _isHovered = false),
+      child: GestureDetector(
+        onTap: widget.onTap,
+        child: Padding(
+          padding: const EdgeInsets.all(6),
+          child: SvgPicture.asset(
+            widget.assetPath,
+            width: widget.size,
+            height: widget.size,
+            colorFilter: ColorFilter.mode(
+              _isHovered ? widget.hoverColor : widget.normalColor,
+              BlendMode.srcIn,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
 }

@@ -4,6 +4,7 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter_hbb/common.dart';
 import 'package:flutter_hbb/common/widgets/dialog.dart';
+import 'package:flutter_hbb/common/widgets/styled_form_widgets.dart';
 import 'package:flutter_hbb/utils/event_loop.dart';
 import 'package:get/get.dart';
 import 'package:path/path.dart' as path;
@@ -174,13 +175,9 @@ class FileModel {
       cancel() => close(false);
       submit() => close(true);
       return CustomAlertDialog(
-        title: Row(
-          children: [
-            const Icon(Icons.warning_rounded, color: Colors.red),
-            Text(title).paddingOnly(
-              left: 10,
-            ),
-          ],
+        title: Text(
+          title,
+          style: MyTheme.dialogTitleStyle,
         ),
         contentBoxConstraints:
             BoxConstraints(minHeight: 100, minWidth: 400, maxWidth: 400),
@@ -204,38 +201,50 @@ class FileModel {
                 ),
               ),
               showCheckbox
-                  ? CheckboxListTile(
-                      contentPadding: const EdgeInsets.all(0),
-                      dense: true,
-                      controlAffinity: ListTileControlAffinity.leading,
-                      title: Text(
-                        translate("Do this for all conflicts"),
-                      ),
-                      value: fileConfirmCheckboxRemember,
-                      onChanged: (v) {
-                        if (v == null) return;
-                        setState(() => fileConfirmCheckboxRemember = v);
+                  ? GestureDetector(
+                      onTap: () {
+                        setState(() => fileConfirmCheckboxRemember = !fileConfirmCheckboxRemember);
                       },
+                      child: Row(
+                        children: [
+                          StyledCheckbox(
+                            value: fileConfirmCheckboxRemember,
+                            onChanged: (v) {
+                              if (v == null) return;
+                              setState(() => fileConfirmCheckboxRemember = v);
+                            },
+                          ),
+                          const SizedBox(width: 8),
+                          Text(translate("Do this for all conflicts")),
+                        ],
+                      ),
                     )
                   : const SizedBox.shrink()
             ]),
         actions: [
-          dialogButton(
-            "Cancel",
-            icon: Icon(Icons.close_rounded),
-            onPressed: cancel,
-            isOutline: true,
-          ),
-          dialogButton(
-            "Skip",
-            icon: Icon(Icons.navigate_next_rounded),
-            onPressed: () => close(null),
-            isOutline: true,
-          ),
-          dialogButton(
-            "OK",
-            icon: Icon(Icons.done_rounded),
-            onPressed: submit,
+          Row(
+            children: [
+              Expanded(
+                child: StyledOutlinedButton(
+                  label: translate("Cancel"),
+                  onPressed: cancel,
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: StyledOutlinedButton(
+                  label: translate("Skip"),
+                  onPressed: () => close(null),
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: StyledPrimaryButton(
+                  label: translate("OK"),
+                  onPressed: submit,
+                ),
+              ),
+            ],
           ),
         ],
         onSubmit: submit,
@@ -256,7 +265,7 @@ class FileModel {
       final toPath = otherSideData.directory.path;
       final isWindows = otherSideData.options.isWindows;
       final showHidden = otherSideData.options.showHidden;
-      final jobID = jobController.addTransferJob(entry, false);
+      final jobID = jobController.addTransferJob(entry, false, toPath);
       webSendLocalFiles(
         handleIndex: handleIndex,
         actId: jobID,
@@ -518,7 +527,7 @@ class FileController {
     final isWindows = otherSideData.options.isWindows;
     final showHidden = otherSideData.options.showHidden;
     for (var from in items.items) {
-      final jobID = jobController.addTransferJob(from, isRemoteToLocal);
+      final jobID = jobController.addTransferJob(from, isRemoteToLocal, toPath);
       bind.sessionSendFiles(
           sessionId: sessionId,
           actId: jobID,
@@ -686,16 +695,9 @@ class FileController {
       cancel() => close(false);
       submit() => close(true);
       return CustomAlertDialog(
-        title: Row(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            const Icon(Icons.warning_rounded, color: Colors.red),
-            Expanded(
-              child: Text(title).paddingOnly(
-                left: 10,
-              ),
-            ),
-          ],
+        title: Text(
+          title,
+          style: MyTheme.dialogTitleStyle,
         ),
         contentBoxConstraints:
             BoxConstraints(minHeight: 100, minWidth: 400, maxWidth: 400),
@@ -711,33 +713,44 @@ class FileController {
               ),
             ).paddingOnly(top: 20),
             showCheckbox
-                ? CheckboxListTile(
-                    contentPadding: const EdgeInsets.all(0),
-                    dense: true,
-                    controlAffinity: ListTileControlAffinity.leading,
-                    title: Text(
-                      translate("Do this for all conflicts"),
-                    ),
-                    value: _removeCheckboxRemember,
-                    onChanged: (v) {
-                      if (v == null) return;
-                      setState(() => _removeCheckboxRemember = v);
+                ? GestureDetector(
+                    onTap: () {
+                      setState(() => _removeCheckboxRemember = !_removeCheckboxRemember);
                     },
+                    child: Row(
+                      children: [
+                        StyledCheckbox(
+                          value: _removeCheckboxRemember,
+                          onChanged: (v) {
+                            if (v == null) return;
+                            setState(() => _removeCheckboxRemember = v);
+                          },
+                        ),
+                        const SizedBox(width: 8),
+                        Text(translate("Do this for all conflicts")),
+                      ],
+                    ),
                   )
                 : const SizedBox.shrink()
           ],
         ),
         actions: [
-          dialogButton(
-            "Cancel",
-            icon: Icon(Icons.close_rounded),
-            onPressed: cancel,
-            isOutline: true,
-          ),
-          dialogButton(
-            "OK",
-            icon: Icon(Icons.done_rounded),
-            onPressed: submit,
+          Row(
+            children: [
+              Expanded(
+                child: StyledOutlinedButton(
+                  label: translate("Cancel"),
+                  onPressed: cancel,
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: StyledPrimaryButton(
+                  label: translate("OK"),
+                  onPressed: submit,
+                ),
+              ),
+            ],
           ),
         ],
         onSubmit: submit,
@@ -816,26 +829,36 @@ class FileController {
       }
 
       return CustomAlertDialog(
+        title: Text(
+          translate('Rename'),
+          style: MyTheme.dialogTitleStyle,
+        ),
         content: Column(
           children: [
             DialogTextField(
-              title: '${translate('Rename')} ${item.name}',
+              title: item.name,
               controller: textEditingController,
               errorText: errorText,
             ),
           ],
         ),
         actions: [
-          dialogButton(
-            "Cancel",
-            icon: Icon(Icons.close_rounded),
-            onPressed: close,
-            isOutline: true,
-          ),
-          dialogButton(
-            "OK",
-            icon: Icon(Icons.done_rounded),
-            onPressed: submit,
+          Row(
+            children: [
+              Expanded(
+                child: StyledOutlinedButton(
+                  label: translate("Cancel"),
+                  onPressed: close,
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: StyledPrimaryButton(
+                  label: translate("OK"),
+                  onPressed: submit,
+                ),
+              ),
+            ],
           ),
         ],
         onSubmit: submit,
@@ -864,8 +887,12 @@ class JobController {
   }
 
   // return jobID
-  int addTransferJob(Entry from, bool isRemoteToLocal) {
+  int addTransferJob(Entry from, bool isRemoteToLocal, String toPath) {
     final jobID = JobController.jobID.next();
+    // 저장될 전체 경로 계산
+    final destPath = toPath.endsWith(path.separator) || toPath.endsWith('/')
+        ? '$toPath${from.name}'
+        : '$toPath${path.separator}${from.name}';
     jobTable.add(JobProgress()
       ..type = JobType.transfer
       ..fileName = path.basename(from.path)
@@ -873,7 +900,8 @@ class JobController {
       ..totalSize = from.size
       ..state = JobState.inProgress
       ..id = jobID
-      ..isRemoteToLocal = isRemoteToLocal);
+      ..isRemoteToLocal = isRemoteToLocal
+      ..to = destPath);
     return jobID;
   }
 

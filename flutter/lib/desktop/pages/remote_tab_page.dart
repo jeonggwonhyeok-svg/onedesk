@@ -16,11 +16,11 @@ import 'package:flutter_hbb/desktop/widgets/material_mod_popup_menu.dart'
     as mod_menu;
 import 'package:flutter_hbb/desktop/widgets/popup_menu.dart';
 import 'package:flutter_hbb/utils/multi_window_manager.dart';
-import 'package:flutter_svg/flutter_svg.dart';
 import 'package:get/get.dart';
 import 'package:bot_toast/bot_toast.dart';
 
 import '../../common/widgets/dialog.dart';
+import '../../common/widgets/styled_form_widgets.dart';
 import '../../models/platform_model.dart';
 
 class _MenuTheme {
@@ -107,7 +107,7 @@ class _ConnectionTabPageState extends State<ConnectionTabPage> {
       _update_remote_count();
     }
     tabController.onRemoved = (_, id) => onRemoveId(id);
-    rustDeskWinManager.setMethodHandler(_remoteMethodHandler);
+    oneDeskWinManager.setMethodHandler(_remoteMethodHandler);
   }
 
   @override
@@ -142,14 +142,15 @@ class _ConnectionTabPageState extends State<ConnectionTabPage> {
         tabBuilder: (key, icon, label, themeConf) => Obx(() {
           final connectionType = ConnectionTypeState.find(key);
           if (!connectionType.isValid()) {
+            // 아이콘 제거 - 라벨만 표시
             return Row(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                icon,
                 label,
               ],
             );
           } else {
+            // 연결 정보 (툴팁용)
             bool secure =
                 connectionType.secure.value == ConnectionType.strSecure;
             bool direct =
@@ -169,19 +170,14 @@ class _ConnectionTabPageState extends State<ConnectionTabPage> {
               msgFingerprint += fingerprint;
             }
 
+            // 아이콘 제거 - 라벨과 읽지 않은 메시지 카운트만 표시
             final tab = Row(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                icon,
                 Tooltip(
                   message: '$msgConn\n$msgFingerprint',
-                  child: SvgPicture.asset(
-                    'assets/${connectionType.secure.value}${connectionType.direct.value}.svg',
-                    width: themeConf.iconSize,
-                    height: themeConf.iconSize,
-                  ).paddingOnly(right: 5),
+                  child: label,
                 ),
-                label,
                 unreadMessageCountBuilder(UnreadChatCountState.find(key))
                     .marginOnly(left: 4),
               ],
@@ -384,6 +380,12 @@ class _ConnectionTabPageState extends State<ConnectionTabPage> {
   Future<bool> handleWindowCloseButton() async {
     final connLength = tabController.length;
     if (connLength == 1) {
+      // 원격 종료 확인 다이얼로그 표시
+      final confirmed = await _showRemoteCloseConfirmDialog();
+      if (!confirmed) {
+        return false;
+      }
+      // 감사 다이얼로그도 확인
       if (await desktopTryShowTabAuditDialogCloseCancelled(
         id: tabController.state.value.tabs[0].key,
         tabController: tabController,
@@ -407,6 +409,63 @@ class _ConnectionTabPageState extends State<ConnectionTabPage> {
       }
       return res;
     }
+  }
+
+  /// 원격 종료 확인 다이얼로그
+  Future<bool> _showRemoteCloseConfirmDialog() async {
+    final completer = Completer<bool>();
+    gFFI.dialogManager.show((setState, close, context) {
+      return CustomAlertDialog(
+        title: Text(
+          translate('Shutdown Remote'),
+          style: const TextStyle(
+            fontSize: 18,
+            fontWeight: FontWeight.bold,
+          ),
+        ),
+        content: Text(
+          translate('Would you like to study remotely?'),
+          style: const TextStyle(fontSize: 14),
+        ),
+        actions: [
+          Row(
+            children: [
+              Expanded(
+                child: StyledOutlinedButton(
+                  label: translate('Cancel'),
+                  onPressed: () {
+                    close();
+                    completer.complete(false);
+                  },
+                  padding: const EdgeInsets.symmetric(vertical: 14),
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: ElevatedButton(
+                  onPressed: () {
+                    close();
+                    completer.complete(true);
+                  },
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: MyTheme.accent,
+                    padding: const EdgeInsets.symmetric(vertical: 14),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                  ),
+                  child: Text(
+                    translate('OK'),
+                    style: const TextStyle(color: Colors.white, fontSize: 16),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ],
+      );
+    });
+    return completer.future;
   }
 
   _update_remote_count() =>

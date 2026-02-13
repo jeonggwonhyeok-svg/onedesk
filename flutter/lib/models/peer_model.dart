@@ -12,6 +12,9 @@ class Peer {
   String username; // pc username
   String hostname;
   String platform;
+  /// OS 버전 정보 (예: "Windows 10 Pro", "Windows 11 Home")
+  /// OS version info from remote peer for display in peer card
+  String osVersion;
   String alias;
   List<dynamic> tags;
   bool forceAlwaysRelay = false;
@@ -37,6 +40,8 @@ class Peer {
         username = json['username'] ?? '',
         hostname = json['hostname'] ?? '',
         platform = json['platform'] ?? '',
+        // OS 버전 정보 파싱 (Rust 백엔드에서 전달)
+        osVersion = json['os_version'] ?? '',
         alias = json['alias'] ?? '',
         tags = json['tags'] ?? [],
         forceAlwaysRelay = json['forceAlwaysRelay'] == 'true',
@@ -55,6 +60,7 @@ class Peer {
       "username": username,
       "hostname": hostname,
       "platform": platform,
+      "os_version": osVersion, // OS 버전 정보
       "alias": alias,
       "tags": tags,
       "forceAlwaysRelay": forceAlwaysRelay.toString(),
@@ -100,6 +106,7 @@ class Peer {
     required this.username,
     required this.hostname,
     required this.platform,
+    this.osVersion = '', // OS 버전 정보 (기본값: 빈 문자열)
     required this.alias,
     required this.tags,
     required this.forceAlwaysRelay,

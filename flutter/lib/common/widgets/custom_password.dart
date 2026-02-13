@@ -11,7 +11,7 @@ abstract class ValidationRule {
 
 class UppercaseValidationRule extends ValidationRule {
   @override
-  String get name => translate('uppercase');
+  String get name => translate('Use uppercase');
   @override
   bool validate(String value) {
     return value.runes.any((int rune) {
@@ -24,7 +24,7 @@ class UppercaseValidationRule extends ValidationRule {
 
 class LowercaseValidationRule extends ValidationRule {
   @override
-  String get name => translate('lowercase');
+  String get name => translate('Use lowercase');
 
   @override
   bool validate(String value) {
@@ -38,7 +38,7 @@ class LowercaseValidationRule extends ValidationRule {
 
 class DigitValidationRule extends ValidationRule {
   @override
-  String get name => translate('digit');
+  String get name => translate('Use numbers');
 
   @override
   bool validate(String value) {
@@ -61,7 +61,7 @@ class MinCharactersValidationRule extends ValidationRule {
   MinCharactersValidationRule(this._numberOfCharacters);
 
   @override
-  String get name => translate('length>=$_numberOfCharacters');
+  String get name => translate('8 or more characters');
 
   @override
   bool validate(String value) {

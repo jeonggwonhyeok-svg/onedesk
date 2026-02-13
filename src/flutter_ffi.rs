@@ -52,15 +52,12 @@ fn initialize(app_dir: &str, custom_client_config: &str) {
     }
     #[cfg(target_os = "android")]
     {
-        // flexi_logger can't work when android_logger initialized.
-        #[cfg(debug_assertions)]
+        // Always use android_logger on Android so logs appear in logcat
         android_logger::init_once(
             android_logger::Config::default()
-                .with_max_level(log::LevelFilter::Debug) // limit log level
-                .with_tag("ffi"), // logs will show under mytag tag
+                .with_max_level(log::LevelFilter::Debug)
+                .with_tag("ffi"),
         );
-        #[cfg(not(debug_assertions))]
-        hbb_common::init_log(false, "");
         #[cfg(feature = "mediacodec")]
         scrap::mediacodec::check_mediacodec();
         crate::common::test_rendezvous_server();
@@ -1109,6 +1106,11 @@ pub fn main_get_local_option(key: String) -> SyncReturn<String> {
     SyncReturn(get_local_option(key))
 }
 
+/// 파일에서 직접 옵션을 읽음 (캐시 우회, 다른 프로세스에서 변경된 값 읽기용)
+pub fn main_get_local_option_from_file(key: String) -> SyncReturn<String> {
+    SyncReturn(hbb_common::config::LocalConfig::get_option_from_file(&key))
+}
+
 pub fn main_get_use_texture_render() -> SyncReturn<bool> {
     SyncReturn(use_texture_render())
 }
@@ -1389,6 +1391,7 @@ pub fn main_load_fav_peers() {
                             username: d.username.clone(),
                             hostname: d.hostname.clone(),
                             platform: d.platform.clone(),
+                            os_version: String::new(),
                         },
                         ..Default::default()
                     },
@@ -1449,6 +1452,10 @@ pub fn main_change_language(lang: String) {
 
 pub fn main_video_save_directory(root: bool) -> SyncReturn<String> {
     SyncReturn(video_save_directory(root))
+}
+
+pub fn main_screenshot_save_directory() -> SyncReturn<String> {
+    SyncReturn(screenshot_save_directory())
 }
 
 pub fn main_set_user_default_option(key: String, value: String) {
@@ -2613,8 +2620,8 @@ pub fn main_get_common(key: String) -> String {
             let _version = key.replace("download-file-", "");
             #[cfg(target_os = "windows")]
             return match crate::platform::windows::is_msi_installed() {
-                Ok(true) => format!("rustdesk-{_version}-x86_64.msi"),
-                Ok(false) => format!("rustdesk-{_version}-x86_64.exe"),
+                Ok(true) => format!("onedesk-{_version}-x86_64.msi"),
+                Ok(false) => format!("onedesk-{_version}-x86_64.exe"),
                 Err(e) => {
                     log::error!("Failed to check if is msi: {}", e);
                     format!("error:update-failed-check-msi-tip")
@@ -2623,9 +2630,9 @@ pub fn main_get_common(key: String) -> String {
             #[cfg(target_os = "macos")]
             {
                 return if cfg!(target_arch = "x86_64") {
-                    format!("rustdesk-{_version}-x86_64.dmg")
+                    format!("onedesk-{_version}-x86_64.dmg")
                 } else if cfg!(target_arch = "aarch64") {
-                    format!("rustdesk-{_version}-aarch64.dmg")
+                    format!("onedesk-{_version}-aarch64.dmg")
                 } else {
                     "error:unsupported".to_owned()
                 };

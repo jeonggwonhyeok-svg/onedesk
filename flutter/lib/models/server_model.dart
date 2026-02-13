@@ -13,12 +13,14 @@ import 'package:window_manager/window_manager.dart';
 
 import '../common.dart';
 import '../common/formatter/id_formatter.dart';
+import '../common/widgets/styled_form_widgets.dart';
 import '../desktop/pages/server_page.dart' as desktop;
 import '../desktop/widgets/tabbar_widget.dart';
 import '../mobile/pages/server_page.dart';
 import 'model.dart';
 
 const kLoginDialogTag = "LOGIN";
+const kVoiceCallDialogTag = "VOICECALL";
 
 const kUseTemporaryPassword = "use-temporary-password";
 const kUsePermanentPassword = "use-permanent-password";
@@ -117,6 +119,9 @@ class ServerModel with ChangeNotifier {
   switchAllowNumericOneTimePassword() async {
     await mainSetBoolOption(
         kOptionAllowNumericOneTimePassword, !_allowNumericOneTimePassword);
+    // 숫자 일회용 비밀번호 설정 변경 시 즉시 비밀번호 갱신
+    await bind.mainUpdateTemporaryPassword();
+    await updatePasswordModel();
   }
 
   TextEditingController get serverId => _serverId;
@@ -147,10 +152,12 @@ class ServerModel with ChangeNotifier {
     */
 
     timerCallback() async {
+      final rawStatus = await bind.mainGetConnectStatus();
       final connectionStatus =
-          jsonDecode(await bind.mainGetConnectStatus()) as Map<String, dynamic>;
+          jsonDecode(rawStatus) as Map<String, dynamic>;
       final statusNum = connectionStatus['status_num'] as int;
       if (statusNum != _connectStatus) {
+        debugPrint("[ConnStatus] changed: $_connectStatus -> $statusNum (raw: $rawStatus)");
         _connectStatus = statusNum;
         notifyListeners();
       }
@@ -388,30 +395,10 @@ class ServerModel with ChangeNotifier {
   }
 
   /// Toggle the screen sharing service.
+  /// 경고 다이얼로그는 server_page.dart에서 처리
   toggleService() async {
     if (_isStart) {
-      final res = await parent.target?.dialogManager
-          .show<bool>((setState, close, context) {
-        submit() => close(true);
-        return CustomAlertDialog(
-          title: Row(children: [
-            const Icon(Icons.warning_amber_sharp,
-                color: Colors.redAccent, size: 28),
-            const SizedBox(width: 10),
-            Text(translate("Warning")),
-          ]),
-          content: Text(translate("android_stop_service_tip")),
-          actions: [
-            TextButton(onPressed: close, child: Text(translate("Cancel"))),
-            TextButton(onPressed: submit, child: Text(translate("OK"))),
-          ],
-          onSubmit: submit,
-          onCancel: close,
-        );
-      });
-      if (res == true) {
-        stopService();
-      }
+      stopService();
     } else {
       await checkRequestNotificationPermission();
       if (bind.mainGetLocalOption(key: kOptionDisableFloatingWindow) != 'Y') {
@@ -420,28 +407,7 @@ class ServerModel with ChangeNotifier {
       if (!await AndroidPermissionManager.check(kManageExternalStorage)) {
         await AndroidPermissionManager.request(kManageExternalStorage);
       }
-      final res = await parent.target?.dialogManager
-          .show<bool>((setState, close, context) {
-        submit() => close(true);
-        return CustomAlertDialog(
-          title: Row(children: [
-            const Icon(Icons.warning_amber_sharp,
-                color: Colors.redAccent, size: 28),
-            const SizedBox(width: 10),
-            Text(translate("Warning")),
-          ]),
-          content: Text(translate("android_service_will_start_tip")),
-          actions: [
-            dialogButton("Cancel", onPressed: close, isOutline: true),
-            dialogButton("OK", onPressed: submit),
-          ],
-          onSubmit: submit,
-          onCancel: close,
-        );
-      });
-      if (res == true) {
-        startService();
-      }
+      startService();
     }
   }
 
@@ -582,7 +548,12 @@ class ServerModel with ChangeNotifier {
       }
       scrollToBottom();
       notifyListeners();
-      if (isAndroid && !client.authorized) showLoginDialog(client);
+      if (!client.authorized) {
+        if (isAndroid) {
+          showLoginDialog(client);
+        }
+        // 데스크톱에서는 CM 창에서 수락/거부 처리
+      }
       if (isAndroid) androidUpdatekeepScreenOn();
     } catch (e) {
       debugPrint("Failed to call loginRequest,error:$e");
@@ -611,19 +582,31 @@ class ServerModel with ChangeNotifier {
   }
 
   void showLoginDialog(Client client) {
-    showClientDialog(
+    String title;
+    IconData icon;
+    if (client.isFileTransfer) {
+      title = translate('File transfer request');
+      icon = Icons.folder_outlined;
+    } else if (client.isViewCamera) {
+      title = translate('Camera share request');
+      icon = Icons.videocam_rounded;
+    } else if (client.portForward.isNotEmpty) {
+      title = translate('Port forward request');
+      icon = Icons.swap_horiz_rounded;
+    } else if (client.isTerminal) {
+      title = translate('Terminal request');
+      icon = Icons.terminal_rounded;
+    } else {
+      title = translate('Access Permission Request');
+      icon = Icons.screen_share_rounded;
+    }
+    showStyledClientDialog(
       client,
-      client.isFileTransfer 
-          ? "Transfer file" 
-          : client.isViewCamera
-              ? "View camera"
-              : client.isTerminal 
-                  ? "Terminal" 
-                  : "Share screen",
-      'Do you accept?',
-      'android_new_connection_tip',
+      title,
+      icon,
       () => sendLoginResponse(client, false),
       () => sendLoginResponse(client, true),
+      tag: getLoginDialogTag(client.id),
     );
   }
 
@@ -633,14 +616,158 @@ class ServerModel with ChangeNotifier {
   }
 
   showVoiceCallDialog(Client client) {
-    showClientDialog(
+    showStyledClientDialog(
       client,
-      'Voice call',
-      'Do you accept?',
-      'android_new_voice_call_tip',
+      translate('Voice chat request'),
+      Icons.mic_rounded,
       () => handleVoiceCall(client, false),
       () => handleVoiceCall(client, true),
+      tag: getVoiceCallDialogTag(client.id),
     );
+  }
+
+  showCameraRequestDialog(Client client) {
+    showStyledClientDialog(
+      client,
+      translate('Camera share request'),
+      Icons.videocam_rounded,
+      () => sendLoginResponse(client, false),
+      () => sendLoginResponse(client, true),
+      tag: getLoginDialogTag(client.id),
+    );
+  }
+
+  /// 피어 캐시에서 platform 정보 조회
+  String _getPeerPlatform(String peerId) {
+    try {
+      final peer = bind.mainGetPeerSync(id: peerId);
+      final config = jsonDecode(peer);
+      return config['info']?['platform'] ?? config['platform'] ?? '';
+    } catch (e) {
+      return '';
+    }
+  }
+
+  /// 피어 ID를 포맷팅 (123 456 789 형태)
+  String _formatPeerId(String peerId) {
+    final cleanId = peerId.replaceAll(RegExp(r'[^0-9]'), '');
+    if (cleanId.length <= 3) return cleanId;
+
+    final buffer = StringBuffer();
+    for (int i = 0; i < cleanId.length; i++) {
+      if (i > 0 && i % 3 == 0) buffer.write(' ');
+      buffer.write(cleanId[i]);
+    }
+    return buffer.toString();
+  }
+
+  // 음성 채팅 다이얼로그 배경색
+  static const Color _voiceDialogBackgroundColor = Color(0xFFFEFEFE);
+  static const Color _cmTextPrimary = Color(0xFF454447);
+  static const Color _cmAccentColor = Color(0xFF5F71FF);
+  static const Color _cmIconBgColor = Color(0xFFEFF1FF);
+
+  /// 스타일이 적용된 클라이언트 다이얼로그 (CM 창 스타일)
+  showStyledClientDialog(Client client, String title, IconData iconData,
+      VoidCallback onCancel, VoidCallback onSubmit, {String? tag}) {
+    parent.target?.dialogManager.show((setState, close, context) {
+      cancel() {
+        onCancel();
+        close();
+      }
+
+      submit() {
+        onSubmit();
+        close();
+      }
+
+      return CustomAlertDialog(
+        title: null,
+        contentPadding: 0,
+        content: Container(
+          width: 320,
+          color: _voiceDialogBackgroundColor,
+          padding: const EdgeInsets.all(20),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              // 타이틀
+              Text(
+                title,
+                style: const TextStyle(
+                  fontSize: 19,
+                  fontWeight: FontWeight.bold,
+                  color: _cmTextPrimary,
+                ),
+              ),
+              const SizedBox(height: 20),
+              // 시스템 아이콘 (OS에 따라 다름)
+              Container(
+                width: 80,
+                height: 80,
+                decoration: BoxDecoration(
+                  color: _cmIconBgColor,
+                  borderRadius: BorderRadius.circular(16),
+                ),
+                child: Center(
+                  child: getPlatformImage(
+                    _getPeerPlatform(client.peerId),
+                    size: 24,
+                    color: _cmAccentColor,
+                  ),
+                ),
+              ),
+              const SizedBox(height: 16),
+              // 유저 이름 ([]로 감싸기)
+              Text(
+                '[${client.name.isNotEmpty ? client.name : translate('Unknown')}]',
+                style: const TextStyle(
+                  fontSize: 19,
+                  fontWeight: FontWeight.bold,
+                  color: _cmTextPrimary,
+                ),
+              ),
+              const SizedBox(height: 4),
+              // 피어 ID ([]로 감싸기)
+              Text(
+                '[${_formatPeerId(client.peerId)}]',
+                style: const TextStyle(
+                  fontSize: 16,
+                  color: _cmTextPrimary,
+                ),
+              ),
+              const SizedBox(height: 24),
+              // 버튼들 (마이페이지 다이얼로그 스타일)
+              Row(
+                children: [
+                  // 거절 버튼
+                  Expanded(
+                    child: StyledOutlinedButton(
+                      label: translate('Decline'),
+                      height: 52,
+                      padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 20),
+                      onPressed: cancel,
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  // 수락 버튼
+                  Expanded(
+                    child: StyledPrimaryButton(
+                      label: translate('Accept'),
+                      height: 52,
+                      onPressed: submit,
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+        actions: [],
+        onSubmit: submit,
+        onCancel: cancel,
+      );
+    }, tag: tag ?? getLoginDialogTag(client.id));
   }
 
   showClientDialog(Client client, String title, String contentTitle,
@@ -676,9 +803,15 @@ class ServerModel with ChangeNotifier {
           ],
         ),
         actions: [
-          dialogButton("Dismiss", onPressed: cancel, isOutline: true),
-          if (approveMode != 'password')
-            dialogButton("Accept", onPressed: submit),
+          Row(
+            children: [
+              Expanded(child: dialogButton("Dismiss", onPressed: cancel, isOutline: true)),
+              if (approveMode != 'password') ...[
+                const SizedBox(width: 12),
+                Expanded(child: dialogButton("Accept", onPressed: submit)),
+              ],
+            ],
+          ),
         ],
         onSubmit: submit,
         onCancel: cancel,
@@ -742,11 +875,35 @@ class ServerModel with ChangeNotifier {
   }
 
   Future<void> closeAll() async {
-    await Future.wait(
-        _clients.map((client) => bind.cmCloseConnection(connId: client.id)));
+    // Rust 백엔드에서 실제 클라이언트 목록 가져오기
+    try {
+      var res = await bind.cmGetClientsState();
+      debugPrint("closeAll: cmGetClientsState result: $res");
+      List<dynamic> clientsJson = jsonDecode(res);
+      debugPrint("closeAll: Found ${clientsJson.length} clients");
+      // 모든 연결 종료
+      for (var json in clientsJson) {
+        final clientId = json['id'] as int;
+        debugPrint("closeAll: Closing client $clientId");
+        await bind.cmCloseConnection(connId: clientId);
+      }
+    } catch (e) {
+      debugPrint("closeAll: Failed to get clients from Rust: $e");
+      // fallback: 로컬 클라이언트 목록 사용
+      debugPrint("closeAll: Using local clients, count: ${_clients.length}");
+      for (var client in _clients) {
+        debugPrint("closeAll: Closing local client ${client.id}");
+        await bind.cmCloseConnection(connId: client.id);
+      }
+    }
     _clients.clear();
     tabController.state.value.tabs.clear();
     if (isAndroid) androidUpdatekeepScreenOn();
+    // CM 창 숨기기
+    if (desktopType == DesktopType.cm) {
+      hideCmWindow();
+    }
+    notifyListeners();
   }
 
   void jumpTo(int id) {
@@ -766,17 +923,18 @@ class ServerModel with ChangeNotifier {
       final client = Client.fromJson(jsonDecode(evt["client"]));
       final index = _clients.indexWhere((element) => element.id == client.id);
       if (index != -1) {
+        final wasIncomingVoiceCall = _clients[index].incomingVoiceCall;
         _clients[index].inVoiceCall = client.inVoiceCall;
         _clients[index].incomingVoiceCall = client.incomingVoiceCall;
         if (client.incomingVoiceCall) {
-          if (isAndroid) {
-            showVoiceCallDialog(client);
-          } else {
-            // Has incoming phone call, let's set the window on top.
+          showVoiceCallDialog(_clients[index]);
+          if (isDesktop) {
             Future.delayed(Duration.zero, () {
               windowOnTop(null);
             });
           }
+        } else if (wasIncomingVoiceCall && !client.incomingVoiceCall) {
+          parent.target?.dialogManager.dismissByTag(getVoiceCallDialogTag(client.id));
         }
         notifyListeners();
       }
@@ -787,22 +945,27 @@ class ServerModel with ChangeNotifier {
 
   void androidUpdatekeepScreenOn() async {
     if (!isAndroid) return;
-    var floatingWindowDisabled =
-        bind.mainGetLocalOption(key: kOptionDisableFloatingWindow) == "Y" ||
-            !await AndroidPermissionManager.check(kSystemAlertWindow);
-    final keepScreenOn = floatingWindowDisabled
-        ? KeepScreenOn.never
-        : optionToKeepScreenOn(
-            bind.mainGetLocalOption(key: kOptionKeepScreenOn));
-    final on = ((keepScreenOn == KeepScreenOn.serviceOn) && _isStart) ||
-        (keepScreenOn == KeepScreenOn.duringControlled &&
-            _clients.map((e) => !e.disconnected).isNotEmpty);
-    if (on != await WakelockPlus.enabled) {
-      if (on) {
-        WakelockPlus.enable();
-      } else {
-        WakelockPlus.disable();
+    try {
+      var floatingWindowDisabled =
+          bind.mainGetLocalOption(key: kOptionDisableFloatingWindow) == "Y" ||
+              !await AndroidPermissionManager.check(kSystemAlertWindow);
+      final keepScreenOn = floatingWindowDisabled
+          ? KeepScreenOn.never
+          : optionToKeepScreenOn(
+              bind.mainGetLocalOption(key: kOptionKeepScreenOn));
+      final on = ((keepScreenOn == KeepScreenOn.serviceOn) && _isStart) ||
+          (keepScreenOn == KeepScreenOn.duringControlled &&
+              _clients.map((e) => !e.disconnected).isNotEmpty);
+      final isEnabled = await WakelockPlus.enabled;
+      if (on != isEnabled) {
+        if (on) {
+          WakelockPlus.enable();
+        } else {
+          WakelockPlus.disable();
+        }
       }
+    } catch (e) {
+      debugPrint("androidUpdatekeepScreenOn error: $e");
     }
   }
 }
@@ -907,6 +1070,10 @@ String getLoginDialogTag(int id) {
   return kLoginDialogTag + id.toString();
 }
 
+String getVoiceCallDialogTag(int id) {
+  return kVoiceCallDialogTag + id.toString();
+}
+
 showInputWarnAlert(FFI ffi) {
   ffi.dialogManager.show((setState, close, context) {
     submit() {
@@ -925,8 +1092,13 @@ showInputWarnAlert(FFI ffi) {
         ],
       ),
       actions: [
-        dialogButton("Cancel", onPressed: close, isOutline: true),
-        dialogButton("Open System Setting", onPressed: submit),
+        Row(
+          children: [
+            Expanded(child: dialogButton("Cancel", onPressed: close, isOutline: true)),
+            const SizedBox(width: 12),
+            Expanded(child: dialogButton("Open System Setting", onPressed: submit)),
+          ],
+        ),
       ],
       onSubmit: submit,
       onCancel: close,

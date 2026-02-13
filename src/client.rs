@@ -1108,7 +1108,7 @@ impl ClientClipboardHandler {
             if let Some(urls) = check_clipboard_files(&mut self.ctx, ClipboardSide::Client, false) {
                 if !urls.is_empty() {
                     #[cfg(target_os = "macos")]
-                    if crate::clipboard::is_file_url_set_by_rustdesk(&urls) {
+                    if crate::clipboard::is_file_url_set_by_onedesk(&urls) {
                         return;
                     }
                     if self.is_file_required() {
@@ -2505,10 +2505,25 @@ impl LoginConfigHandler {
             self.version = hbb_common::get_version_number(&pi.version);
         }
         self.features = pi.features.clone().into_option();
+
+        // platform_additions에서 os_version 파싱
+        // Parse os_version from platform_additions for peer card display
+        let os_version = if !pi.platform_additions.is_empty() {
+            serde_json::from_str::<std::collections::HashMap<String, serde_json::Value>>(
+                &pi.platform_additions,
+            )
+            .ok()
+            .and_then(|m| m.get("os_version").and_then(|v| v.as_str()).map(|s| s.to_string()))
+            .unwrap_or_default()
+        } else {
+            String::new()
+        };
+
         let serde = PeerInfoSerde {
             username: pi.username.clone(),
             hostname: pi.hostname.clone(),
             platform: pi.platform.clone(),
+            os_version, // OS 버전 정보 저장
         };
         let mut config = self.load_config();
         config.info = serde;
@@ -3630,7 +3645,7 @@ pub trait Interface: Send + Clone + 'static + Sized {
     }
 
     fn on_establish_connection_error(&self, err: String) {
-        let title = "Connection Error";
+        let title = "Connection decline";
         let text = err.to_string();
         let lc = self.get_lch();
         let direct = lc.read().unwrap().direct;
@@ -3836,7 +3851,7 @@ lazy_static::lazy_static! {
 #[inline]
 pub fn check_if_retry(msgtype: &str, title: &str, text: &str, retry_for_relay: bool) -> bool {
     msgtype == "error"
-        && title == "Connection Error"
+        && title == "Connection decline"
         && ((text.contains("10054") || text.contains("104")) && retry_for_relay
             || (!text.to_lowercase().contains("offline")
                 && !text.to_lowercase().contains("not exist")
@@ -3873,7 +3888,7 @@ async fn hc_connection_(
     mut rx: UnboundedReceiver<()>,
     token: String,
 ) -> ResultType<()> {
-    let mut timer = crate::rustdesk_interval(interval(crate::TIMER_OUT));
+    let mut timer = crate::onedesk_interval(interval(crate::TIMER_OUT));
     let mut last_recv_msg = Instant::now();
     let mut keep_alive = crate::DEFAULT_KEEP_ALIVE;
 

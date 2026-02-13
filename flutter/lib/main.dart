@@ -8,6 +8,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_hbb/common/widgets/overlay.dart';
 import 'package:flutter_hbb/desktop/pages/desktop_tab_page.dart';
+import 'package:flutter_hbb/desktop/pages/auth_wrapper.dart';
 import 'package:flutter_hbb/desktop/pages/install_page.dart';
 import 'package:flutter_hbb/desktop/pages/server_page.dart';
 import 'package:flutter_hbb/desktop/screen/desktop_file_transfer_screen.dart';
@@ -15,6 +16,9 @@ import 'package:flutter_hbb/desktop/screen/desktop_view_camera_screen.dart';
 import 'package:flutter_hbb/desktop/screen/desktop_port_forward_screen.dart';
 import 'package:flutter_hbb/desktop/screen/desktop_remote_screen.dart';
 import 'package:flutter_hbb/desktop/screen/desktop_terminal_screen.dart';
+import 'package:flutter_hbb/desktop/screen/desktop_plan_selection_screen.dart';
+import 'package:flutter_hbb/desktop/pages/voice_call_dialog_page.dart';
+import 'package:flutter_hbb/desktop/pages/camera_request_dialog_page.dart';
 import 'package:flutter_hbb/desktop/widgets/refresh_wrapper.dart';
 import 'package:flutter_hbb/models/state_model.dart';
 import 'package:flutter_hbb/utils/multi_window_manager.dart';
@@ -26,6 +30,7 @@ import 'package:window_manager/window_manager.dart';
 import 'common.dart';
 import 'consts.dart';
 import 'mobile/pages/home_page.dart';
+import 'mobile/pages/mobile_auth_wrapper.dart';
 import 'mobile/pages/server_page.dart';
 import 'models/platform_model.dart';
 
@@ -98,6 +103,19 @@ Future<void> main(List<String> args) async {
           argument,
           kAppTypeDesktopTerminal,
         );
+        break;
+      case WindowType.PlanSelection:
+        desktopType = DesktopType.planSelection;
+        runPlanSelectionScreen(argument);
+        break;
+      case WindowType.VoiceCallDialog:
+        desktopType = DesktopType.voiceCallDialog;
+        runVoiceCallDialogScreen(argument);
+        break;
+      case WindowType.CameraRequestDialog:
+        desktopType = DesktopType.cameraRequestDialog;
+        runCameraRequestDialogScreen(argument);
+        break;
       default:
         break;
     }
@@ -155,8 +173,12 @@ void runMainApp(bool startService) async {
 
   // Set window option.
   WindowOptions windowOptions = getHiddenTitleBarWindowOptions(
-      isMainWindow: true, alwaysOnTop: alwaysOnTop);
+      isMainWindow: true,
+      minimumSize: const Size(kMainWindowMinWidth, kMainWindowMinHeight),
+      alwaysOnTop: alwaysOnTop);
   windowManager.waitUntilReadyToShow(windowOptions, () async {
+    // 최소 창 크기 강제 설정
+    await windowManager.setMinimumSize(const Size(kMainWindowMinWidth, kMainWindowMinHeight));
     // Restore the location of the main window before window hide or show.
     await restoreWindowPosition(WindowType.Main);
     // Check the startup argument, if we successfully handle the argument, we keep the main window hidden.
@@ -168,7 +190,7 @@ void runMainApp(bool startService) async {
       windowManager.show();
       windowManager.focus();
       // Move registration of active main window here to prevent from async visible check.
-      rustDeskWinManager.registerActiveWindow(kWindowMainId);
+      oneDeskWinManager.registerActiveWindow(kWindowMainId);
     }
     windowManager.setOpacity(1);
     windowManager.setTitle(getWindowName());
@@ -287,19 +309,28 @@ void runMultiWindow(
 }
 
 void runConnectionManagerScreen() async {
+  debugPrint('[CM] runConnectionManagerScreen started');
   await initEnv(kAppTypeConnectionManager);
+  // 이벤트 리스너 시작 전에 isConnManager를 먼저 설정
+  gFFI.chatModel.isConnManager = true;
+  debugPrint('[CM] initEnv completed, isConnManager set to true');
   _runApp(
     '',
     const DesktopServerPage(),
     MyTheme.currentThemeMode(),
   );
+  debugPrint('[CM] _runApp completed');
   final hide = await bind.cmGetConfig(name: "hide_cm") == 'true';
+  debugPrint('[CM] hide_cm config: $hide');
   gFFI.serverModel.hideCm = hide;
   if (hide) {
+    debugPrint('[CM] Calling hideCmWindow...');
     await hideCmWindow(isStartup: true);
   } else {
+    debugPrint('[CM] Calling showCmWindow...');
     await showCmWindow(isStartup: true);
   }
+  debugPrint('[CM] CM initialization complete');
   setResizable(false);
   // Start the uni links handler and redirect links to Native, not for Flutter.
   listenUniLinks(handleByFlutter: false);
@@ -308,20 +339,26 @@ void runConnectionManagerScreen() async {
 bool _isCmReadyToShow = false;
 
 showCmWindow({bool isStartup = false}) async {
+  debugPrint('[CM] showCmWindow called, isStartup: $isStartup');
   if (isStartup) {
+    debugPrint('[CM] Creating window options...');
     WindowOptions windowOptions = getHiddenTitleBarWindowOptions(
         size: kConnectionManagerWindowSizeClosedChat, alwaysOnTop: true);
+    debugPrint('[CM] Waiting until ready to show...');
     await windowManager.waitUntilReadyToShow(windowOptions, null);
+    debugPrint('[CM] Window ready, calling show/focus/opacity...');
     bind.mainHideDock();
     await Future.wait([
       windowManager.show(),
       windowManager.focus(),
       windowManager.setOpacity(1)
     ]);
+    debugPrint('[CM] Setting size alignment...');
     // ensure initial window size to be changed
     await windowManager.setSizeAlignment(
         kConnectionManagerWindowSizeClosedChat, Alignment.topRight);
     _isCmReadyToShow = true;
+    debugPrint('[CM] CM window shown successfully!');
   } else if (_isCmReadyToShow) {
     if (await windowManager.getOpacity() != 1) {
       await windowManager.setOpacity(1);
@@ -382,6 +419,9 @@ void _runApp(
       builder: (context, child) {
         child = _keepScaleBuilder(context, child);
         child = botToastBuilder(context, child);
+        if (isWindows) {
+          child = _buildRoundedWindow(context, child);
+        }
         return child;
       },
     ),
@@ -392,8 +432,10 @@ void runInstallPage() async {
   await windowManager.ensureInitialized();
   await initEnv(kAppTypeMain);
   _runApp('', const InstallPage(), MyTheme.currentThemeMode());
-  WindowOptions windowOptions =
-      getHiddenTitleBarWindowOptions(size: Size(800, 600), center: true);
+  WindowOptions windowOptions = getHiddenTitleBarWindowOptions(
+      size: const Size(kMainWindowMinWidth, kMainWindowMinHeight),
+      minimumSize: const Size(kMainWindowMinWidth, kMainWindowMinHeight),
+      center: true);
   windowManager.waitUntilReadyToShow(windowOptions, () async {
     windowManager.show();
     windowManager.focus();
@@ -402,9 +444,63 @@ void runInstallPage() async {
   });
 }
 
+/// 플랜 선택 창 실행
+void runPlanSelectionScreen(Map<String, dynamic> argument) async {
+  await initEnv(kAppTypeDesktopPlanSelection);
+  final title = translate('Plan Selection');
+  WindowController.fromWindowId(kWindowId!).setPreventClose(false);
+  _runApp(
+    title,
+    DesktopPlanSelectionScreen(params: argument),
+    MyTheme.currentThemeMode(),
+  );
+  WindowController.fromWindowId(kWindowId!).show();
+}
+
+/// 음성 채팅 요청 다이얼로그 창 실행
+void runVoiceCallDialogScreen(Map<String, dynamic> argument) async {
+  await initEnv(kAppTypeDesktopVoiceCallDialog);
+  final title = translate('Voice Chat Request');
+  final clientId = argument['client_id'] as int;
+  final clientName = argument['client_name'] as String;
+  final clientPeerId = argument['client_peer_id'] as String;
+  WindowController.fromWindowId(kWindowId!).setPreventClose(false);
+  _runApp(
+    title,
+    VoiceCallDialogPage(
+      clientId: clientId,
+      clientName: clientName,
+      clientPeerId: clientPeerId,
+    ),
+    MyTheme.currentThemeMode(),
+  );
+  WindowController.fromWindowId(kWindowId!).show();
+}
+
+/// 카메라 공유 요청 다이얼로그 창 실행
+void runCameraRequestDialogScreen(Map<String, dynamic> argument) async {
+  await initEnv(kAppTypeDesktopCameraRequestDialog);
+  final title = translate('Camera Share Request');
+  final clientId = argument['client_id'] as int;
+  final clientName = argument['client_name'] as String;
+  final clientPeerId = argument['client_peer_id'] as String;
+  WindowController.fromWindowId(kWindowId!).setPreventClose(false);
+  _runApp(
+    title,
+    CameraRequestDialogPage(
+      clientId: clientId,
+      clientName: clientName,
+      clientPeerId: clientPeerId,
+    ),
+    MyTheme.currentThemeMode(),
+  );
+  WindowController.fromWindowId(kWindowId!).show();
+}
+
 WindowOptions getHiddenTitleBarWindowOptions(
     {bool isMainWindow = false,
     Size? size,
+    Size? minimumSize,
     bool center = false,
     bool? alwaysOnTop}) {
   var defaultTitleBarStyle = TitleBarStyle.hidden;
@@ -414,6 +510,7 @@ WindowOptions getHiddenTitleBarWindowOptions(
   }
   return WindowOptions(
     size: size,
+    minimumSize: minimumSize,
     center: center,
     backgroundColor: (isMacOS && isMainWindow) ? null : Colors.transparent,
     skipTaskbar: false,
@@ -506,10 +603,10 @@ class _AppState extends State<App> with WidgetsBindingObserver {
           darkTheme: MyTheme.darkTheme,
           themeMode: MyTheme.currentThemeMode(),
           home: isDesktop
-              ? const DesktopTabPage()
+              ? const AuthWrapper()
               : isWeb
                   ? WebHomePage()
-                  : HomePage(),
+                  : const MobileAuthWrapper(),
           localizationsDelegates: const [
             GlobalMaterialLocalizations.delegate,
             GlobalWidgetsLocalizations.delegate,
@@ -538,6 +635,8 @@ class _AppState extends State<App> with WidgetsBindingObserver {
                   }
                   if (isLinux) {
                     return buildVirtualWindowFrame(context, child);
+                  } else if (isWindows) {
+                    return _buildRoundedWindow(context, child);
                   } else {
                     return workaroundWindowBorder(context, child);
                   }
@@ -554,6 +653,23 @@ Widget _keepScaleBuilder(BuildContext context, Widget? child) {
       textScaler: TextScaler.linear(1.0),
     ),
     child: child ?? Container(),
+  );
+}
+
+/// Windows 전용: 기본 창 래퍼 (Windows 11 네이티브 8px 둥근 모서리 적용)
+/// Windows 11의 네이티브 둥근 모서리(8px)에 맞춰 Flutter 컨텐츠도 클리핑
+Widget _buildRoundedWindow(BuildContext context, Widget? child) {
+  // Windows 11 스타일 8px 둥근 모서리로 클리핑
+  // Container와 ClipRRect 모두 동일한 borderRadius 적용
+  return Container(
+    decoration: BoxDecoration(
+      color: Theme.of(context).scaffoldBackgroundColor,
+      borderRadius: BorderRadius.circular(8),
+    ),
+    child: ClipRRect(
+      borderRadius: BorderRadius.circular(8),
+      child: child ?? Container(),
+    ),
   );
 }
 

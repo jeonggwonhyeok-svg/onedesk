@@ -224,34 +224,49 @@ class _ViewCameraPageState extends State<ViewCameraPage>
   }
 
   @override
-  Future<void> dispose() async {
+  void dispose() {
     final closeSession = closeSessionOnDispose.remove(widget.id) ?? true;
 
     // https://github.com/flutter/flutter/issues/64935
     super.dispose();
     debugPrint("VIEW CAMERA PAGE dispose session $sessionId ${widget.id}");
-    _ffi.textureModel.onViewCameraPageDispose(closeSession);
-    if (closeSession) {
-      // ensure we leave this session, this is a double check
-      _ffi.inputModel.enterOrLeave(false);
-    }
-    DesktopMultiWindow.removeListener(this);
-    _ffi.dialogManager.hideMobileActionsOverlay();
-    _ffi.imageModel.disposeImage();
-    _ffi.cursorModel.disposeImages();
-    _rawKeyFocusNode.dispose();
-    await _ffi.close(closeSession: closeSession);
+
     _timer?.cancel();
-    _ffi.dialogManager.dismissAll();
-    if (closeSession) {
-      await SystemChrome.setEnabledSystemUIMode(SystemUiMode.manual,
-          overlays: SystemUiOverlay.values);
-    }
-    if (!isLinux) {
-      await WakelockPlus.disable();
-    }
-    await Get.delete<FFI>(tag: widget.id);
-    removeSharedStates(widget.id);
+    _rawKeyFocusNode.dispose();
+    DesktopMultiWindow.removeListener(this);
+
+    // Fire-and-forget async cleanup to prevent window hang
+    Future.microtask(() async {
+      try {
+        _ffi.textureModel.onViewCameraPageDispose(closeSession);
+        if (closeSession) {
+          _ffi.inputModel.enterOrLeave(false);
+        }
+        _ffi.dialogManager.hideMobileActionsOverlay();
+        _ffi.imageModel.disposeImage();
+        _ffi.cursorModel.disposeImages();
+
+        await _ffi.close(closeSession: closeSession).timeout(
+          const Duration(seconds: 2),
+          onTimeout: () {
+            debugPrint("VIEW CAMERA PAGE close timeout");
+          },
+        );
+
+        _ffi.dialogManager.dismissAll();
+        if (closeSession) {
+          SystemChrome.setEnabledSystemUIMode(SystemUiMode.manual,
+              overlays: SystemUiOverlay.values);
+        }
+        if (!isLinux) {
+          WakelockPlus.disable();
+        }
+        Get.delete<FFI>(tag: widget.id);
+        removeSharedStates(widget.id);
+      } catch (e) {
+        debugPrint("VIEW CAMERA PAGE dispose error: $e");
+      }
+    });
   }
 
   Widget emptyOverlay() => BlockableOverlay(

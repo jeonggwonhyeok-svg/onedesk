@@ -55,6 +55,9 @@ class DraggableChatWindow extends StatelessWidget {
             width: width,
             height: height,
             chatModel: chatModel,
+            sizeStore: draggablePositions.chatWindowSize,
+            minWidth: DraggablePositions.kMinChatWidth,
+            minHeight: DraggablePositions.kMinChatHeight,
             builder: (context, onPanUpdate) {
               final child = Scaffold(
                 resizeToAvoidBottomInset: false,
@@ -66,10 +69,14 @@ class DraggableChatWindow extends StatelessWidget {
                 ),
                 body: ChatPage(chatModel: chatModel),
               );
-              return Container(
-                  decoration:
-                      BoxDecoration(border: Border.all(color: MyTheme.border)),
-                  child: child);
+              return ClipRRect(
+                  borderRadius: BorderRadius.circular(8),
+                  child: Container(
+                      decoration: BoxDecoration(
+                        border: Border.all(color: MyTheme.border),
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: child));
             });
   }
 
@@ -133,7 +140,7 @@ class DraggableChatWindow extends StatelessWidget {
                   opacity: chatModel.isWindowFocus.value ? 1.0 : 0.4,
                   child: Row(children: [
                     Icon(Icons.chat_bubble_outline,
-                        size: 20, color: Theme.of(context).colorScheme.primary),
+                        size: 20, color: const Color(0xFF5F71FF)),
                     SizedBox(width: 6),
                     Text(translate("Chat"))
                   ])))),
@@ -247,6 +254,44 @@ class DraggableMobileActions extends StatelessWidget {
   }
 }
 
+/// 채팅창 크기 저장 클래스
+class DraggableKeySize {
+  final String key;
+  final double defaultWidth;
+  final double defaultHeight;
+  Size _size;
+  late Debouncer<int> _debouncerStore;
+
+  DraggableKeySize(this.key, {required this.defaultWidth, required this.defaultHeight})
+      : _size = Size(defaultWidth, defaultHeight);
+
+  Size get size => _size;
+  double get width => _size.width;
+  double get height => _size.height;
+
+  void load() {
+    final value = bind.getLocalFlutterOption(k: key);
+    if (value.isNotEmpty) {
+      final parts = value.split(',');
+      if (parts.length == 2) {
+        _size = Size(double.parse(parts[0]), double.parse(parts[1]));
+      }
+    }
+    _debouncerStore = Debouncer<int>(const Duration(milliseconds: 500),
+        onChanged: (v) => _store(), initialValue: 0);
+  }
+
+  void update(Size size) {
+    _size = size;
+    _triggerStore();
+  }
+
+  void _triggerStore() => _debouncerStore.value = _debouncerStore.value + 1;
+  void _store() {
+    bind.setLocalFlutterOption(k: key, v: '${_size.width},${_size.height}');
+  }
+}
+
 class DraggableKeyPosition {
   final String key;
   Offset _pos;
@@ -316,16 +361,25 @@ class DraggableKeyPosition {
 
 class DraggablePositions {
   static const kChatWindow = 'draggablePositionChat';
+  static const kChatWindowSize = 'draggableSizeChat';
   static const kMobileActions = 'draggablePositionMobile';
   static const kIOSDraggable = 'draggablePositionIOS';
 
   static const kInvalidDraggablePosition = Offset(-999999, -999999);
+  static const kDefaultChatWidth = 300.0;
+  static const kDefaultChatHeight = 400.0;
+  static const kMinChatWidth = 200.0;
+  static const kMinChatHeight = 250.0;
+
   final chatWindow = DraggableKeyPosition(kChatWindow);
+  final chatWindowSize = DraggableKeySize(kChatWindowSize,
+      defaultWidth: kDefaultChatWidth, defaultHeight: kDefaultChatHeight);
   final mobileActions = DraggableKeyPosition(kMobileActions);
   final iOSDraggable = DraggableKeyPosition(kIOSDraggable);
 
   load() {
     chatWindow.load();
+    chatWindowSize.load();
     mobileActions.load();
     iOSDraggable.load();
   }
@@ -342,6 +396,9 @@ class Draggable extends StatefulWidget {
       required this.width,
       required this.height,
       this.chatModel,
+      this.sizeStore,
+      this.minWidth,
+      this.minHeight,
       required this.builder})
       : super(key: key);
 
@@ -351,6 +408,9 @@ class Draggable extends StatefulWidget {
   final double width;
   final double height;
   final ChatModel? chatModel;
+  final DraggableKeySize? sizeStore;
+  final double? minWidth;
+  final double? minHeight;
   final Widget Function(BuildContext, GestureDragUpdateCallback) builder;
 
   @override
@@ -369,22 +429,26 @@ class _DraggableState extends State<Draggable> {
 
   get position => widget.position.pos;
 
+  // 현재 크기 (sizeStore가 있으면 저장된 크기 사용, 없으면 widget 기본 크기)
+  double get currentWidth => widget.sizeStore?.width ?? widget.width;
+  double get currentHeight => widget.sizeStore?.height ?? widget.height;
+
   void onPanUpdate(DragUpdateDetails d) {
     final offset = d.delta;
     final size = MediaQuery.of(context).size;
     double x = 0;
     double y = 0;
 
-    if (position.dx + offset.dx + widget.width > size.width) {
-      x = size.width - widget.width;
+    if (position.dx + offset.dx + currentWidth > size.width) {
+      x = size.width - currentWidth;
     } else if (position.dx + offset.dx < 0) {
       x = 0;
     } else {
       x = position.dx + offset.dx;
     }
 
-    if (position.dy + offset.dy + widget.height > size.height) {
-      y = size.height - widget.height;
+    if (position.dy + offset.dy + currentHeight > size.height) {
+      y = size.height - currentHeight;
     } else if (position.dy + offset.dy < 0) {
       y = 0;
     } else {
@@ -396,9 +460,29 @@ class _DraggableState extends State<Draggable> {
     _chatModel?.setChatWindowPosition(position);
   }
 
+  // 리사이즈 핸들러
+  void onResizeUpdate(DragUpdateDetails d) {
+    if (widget.sizeStore == null) return;
+
+    final screenSize = MediaQuery.of(context).size;
+    final minW = widget.minWidth ?? 100;
+    final minH = widget.minHeight ?? 100;
+
+    double newWidth = currentWidth + d.delta.dx;
+    double newHeight = currentHeight + d.delta.dy;
+
+    // 최소 크기 제한
+    newWidth = newWidth.clamp(minW, screenSize.width - position.dx);
+    newHeight = newHeight.clamp(minH, screenSize.height - position.dy);
+
+    setState(() {
+      widget.sizeStore!.update(Size(newWidth, newHeight));
+    });
+  }
+
   checkScreenSize() {
     // Ensure the draggable always stays within current screen bounds
-    widget.position.tryAdjust(widget.width, widget.height, 1);
+    widget.position.tryAdjust(currentWidth, currentHeight, 1);
   }
 
   checkKeyboard() {
@@ -419,7 +503,7 @@ class _DraggableState extends State<Draggable> {
 
     // onKeyboardVisible
     if (_keyboardVisible && currentVisible) {
-      final sumHeight = bottomHeight + widget.height;
+      final sumHeight = bottomHeight + currentHeight;
       final contextHeight = MediaQuery.of(context).size.height;
       if (sumHeight + position.dy > contextHeight) {
         final y = contextHeight - sumHeight;
@@ -445,11 +529,61 @@ class _DraggableState extends State<Draggable> {
       Positioned(
           top: position.dy,
           left: position.dx,
-          width: widget.width,
-          height: widget.height,
-          child: widget.builder(context, onPanUpdate))
+          width: currentWidth,
+          height: currentHeight,
+          child: Stack(
+            children: [
+              widget.builder(context, onPanUpdate),
+              // 리사이즈 핸들 (sizeStore가 있을 때만 표시)
+              if (widget.sizeStore != null)
+                Positioned(
+                  right: 0,
+                  bottom: 0,
+                  child: GestureDetector(
+                    onPanUpdate: onResizeUpdate,
+                    child: MouseRegion(
+                      cursor: SystemMouseCursors.resizeDownRight,
+                      child: Container(
+                        width: 16,
+                        height: 16,
+                        decoration: const BoxDecoration(
+                          color: Colors.transparent,
+                        ),
+                        child: CustomPaint(
+                          painter: _ResizeHandlePainter(),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+            ],
+          ))
     ]);
   }
+}
+
+/// 리사이즈 핸들 페인터 (오른쪽 하단 대각선)
+class _ResizeHandlePainter extends CustomPainter {
+  @override
+  void paint(Canvas canvas, Size size) {
+    final paint = Paint()
+      ..color = const Color(0x99888888)
+      ..strokeWidth = 1.5
+      ..style = PaintingStyle.stroke;
+
+    // 대각선 3개 그리기
+    for (int i = 0; i < 3; i++) {
+      final offset = 4.0 * i;
+      canvas.drawLine(
+        Offset(size.width - 2 - offset, size.height),
+        Offset(size.width, size.height - 2 - offset),
+        paint,
+      );
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
 }
 
 class IOSDraggable extends StatefulWidget {

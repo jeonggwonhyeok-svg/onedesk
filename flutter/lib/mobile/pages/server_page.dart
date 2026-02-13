@@ -1,15 +1,18 @@
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_hbb/desktop/pages/desktop_home_page.dart';
 import 'package:flutter_hbb/mobile/widgets/dialog.dart';
-import 'package:flutter_hbb/models/chat_model.dart';
+import 'package:flutter_svg/flutter_svg.dart';
 import 'package:get/get.dart';
 import 'package:provider/provider.dart';
 
 import '../../common.dart';
+import '../../common/widgets/chat_page.dart';
 import '../../common/widgets/dialog.dart';
+import '../../common/widgets/cm_custom_toggle.dart';
 import '../../consts.dart';
 import '../../models/platform_model.dart';
 import '../../models/server_model.dart';
@@ -17,16 +20,13 @@ import 'home_page.dart';
 
 class ServerPage extends StatefulWidget implements PageShape {
   @override
-  final title = translate("Share screen");
+  final title = translate("Screen Share");
 
   @override
   final icon = const Icon(Icons.mobile_screen_share);
 
   @override
-  final appBarActions = (!bind.isDisableSettings() &&
-          bind.mainGetBuildinOption(key: kOptionHideSecuritySetting) != 'Y')
-      ? [_DropDownAction()]
-      : [];
+  final appBarActions = <Widget>[];
 
   ServerPage({Key? key}) : super(key: key);
 
@@ -196,24 +196,35 @@ class _ServerPageState extends State<ServerPage> {
     return ChangeNotifierProvider.value(
         value: gFFI.serverModel,
         child: Consumer<ServerModel>(
-            builder: (context, serverModel, child) => SingleChildScrollView(
-                  controller: gFFI.serverModel.controller,
-                  child: Center(
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.start,
-                      children: [
-                        buildPresetPasswordWarningMobile(),
-                        gFFI.serverModel.isStart
-                            ? ServerInfo()
-                            : ServiceNotRunningNotification(),
-                        const ConnectionManager(),
-                        const PermissionChecker(),
-                        SizedBox.fromSize(size: const Size(0, 15.0)),
-                      ],
-                    ),
+            builder: (context, serverModel, child) => Container(
+                  color: const Color(0xFFFEFEFE),
+                  child: Column(
+                    children: [
+                      // Content
+                      Expanded(
+                        child: SingleChildScrollView(
+                          controller: gFFI.serverModel.controller,
+                          child: Center(
+                            child: Column(
+                              mainAxisAlignment: MainAxisAlignment.start,
+                              children: [
+                                buildPresetPasswordWarningMobile(),
+                                gFFI.serverModel.isStart
+                                    ? ServerInfo()
+                                    : ServiceNotRunningNotification(),
+                                ConnectionManager(),
+                                const PermissionChecker(),
+                                SizedBox.fromSize(size: const Size(0, 15.0)),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
                   ),
                 )));
   }
+
 }
 
 void checkService() async {
@@ -233,31 +244,70 @@ class ServiceNotRunningNotification extends StatelessWidget {
   Widget build(BuildContext context) {
     final serverModel = Provider.of<ServerModel>(context);
 
-    return PaddingCard(
-        title: translate("Service is not running"),
-        titleIcon:
-            const Icon(Icons.warning_amber_sharp, color: Colors.redAccent),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(translate("android_start_service_tip"),
-                    style:
-                        const TextStyle(fontSize: 12, color: MyTheme.darkGray))
-                .marginOnly(bottom: 8),
-            ElevatedButton.icon(
-                icon: const Icon(Icons.play_arrow),
-                onPressed: () {
-                  if (gFFI.userModel.userName.value.isEmpty &&
-                      bind.mainGetLocalOption(key: "show-scam-warning") !=
-                          "N") {
-                    showScamWarning(context, serverModel);
-                  } else {
-                    serverModel.toggleService();
-                  }
-                },
-                label: Text(translate("Start service")))
-          ],
-        ));
+    return Container(
+      margin: const EdgeInsets.fromLTRB(16, 16, 16, 0),
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: const Color(0xFFFEFEFE),
+        borderRadius: BorderRadius.circular(16),
+        boxShadow: [
+          BoxShadow(
+            color: const Color(0xFF333C87).withValues(alpha: 0.15),
+            blurRadius: 20,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Title
+          Text(
+            translate("Service is not running"),
+            style: const TextStyle(
+              fontSize: 18,
+              fontWeight: FontWeight.bold,
+              color: Color(0xFF5F71FF),
+            ),
+          ),
+          const SizedBox(height: 8),
+          // Description
+          Text(
+            translate("android_start_service_tip"),
+            style: const TextStyle(
+              fontSize: 13,
+              color: Color(0xFF646368),
+              height: 1.5,
+            ),
+          ),
+          const SizedBox(height: 16),
+          // Start service button (홈페이지 연결 버튼 스타일)
+          SizedBox(
+            width: double.infinity,
+            child: ElevatedButton(
+              onPressed: () {
+                _showServiceWarningDialog(context, serverModel);
+              },
+              style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFF5B7BF8),
+                foregroundColor: Colors.white,
+                elevation: 0,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(8),
+                ),
+              ),
+              child: Text(
+                translate("Start service"),
+                style: const TextStyle(
+                  fontSize: 15,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
   }
 }
 
@@ -455,7 +505,6 @@ class ScamWarningDialogState extends State<ScamWarningDialog> {
 
 class ServerInfo extends StatelessWidget {
   final model = gFFI.serverModel;
-  final emptyController = TextEditingController(text: "-");
 
   ServerInfo({Key? key}) : super(key: key);
 
@@ -463,104 +512,263 @@ class ServerInfo extends StatelessWidget {
   Widget build(BuildContext context) {
     final serverModel = Provider.of<ServerModel>(context);
 
-    const Color colorPositive = Colors.green;
-    const Color colorNegative = Colors.red;
-    const double iconMarginRight = 15;
-    const double iconSize = 24;
-    const TextStyle textStyleHeading = TextStyle(
-        fontSize: 16.0, fontWeight: FontWeight.bold, color: Colors.grey);
-    const TextStyle textStyleValue =
-        TextStyle(fontSize: 25.0, fontWeight: FontWeight.bold);
-
     void copyToClipboard(String value) {
       Clipboard.setData(ClipboardData(text: value));
       showToast(translate('Copied'));
     }
 
-    Widget ConnectionStateNotification() {
+    // 연결 상태 배지
+    Widget connectionStatusBadge() {
       if (serverModel.connectStatus == -1) {
-        return Row(children: [
-          const Icon(Icons.warning_amber_sharp,
-                  color: colorNegative, size: iconSize)
-              .marginOnly(right: iconMarginRight),
-          Expanded(child: Text(translate('not_ready_status')))
-        ]);
+        return Container(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+          decoration: BoxDecoration(
+            color: const Color(0xFFFFEBEB),
+            borderRadius: BorderRadius.circular(12),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: 6,
+                height: 6,
+                decoration: const BoxDecoration(
+                  color: Color(0xFFFE6565),
+                  shape: BoxShape.circle,
+                ),
+              ),
+              const SizedBox(width: 6),
+              Text(
+                translate('not_ready_status'),
+                style: const TextStyle(
+                  color: Color(0xFFFE6565),
+                  fontSize: 12,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+            ],
+          ),
+        );
       } else if (serverModel.connectStatus == 0) {
-        return Row(children: [
-          SizedBox(width: 20, height: 20, child: CircularProgressIndicator())
-              .marginOnly(left: 4, right: iconMarginRight),
-          Expanded(child: Text(translate('connecting_status')))
-        ]);
+        return Container(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+          decoration: BoxDecoration(
+            color: const Color(0xFFFFF3E0),
+            borderRadius: BorderRadius.circular(12),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const SizedBox(
+                width: 10,
+                height: 10,
+                child: CircularProgressIndicator(
+                  strokeWidth: 2,
+                  color: Color(0xFFFF9800),
+                ),
+              ),
+              const SizedBox(width: 6),
+              Text(
+                translate('connecting_status'),
+                style: const TextStyle(
+                  color: Color(0xFFFF9800),
+                  fontSize: 12,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+            ],
+          ),
+        );
       } else {
-        return Row(children: [
-          const Icon(Icons.check, color: colorPositive, size: iconSize)
-              .marginOnly(right: iconMarginRight),
-          Expanded(child: Text(translate('Ready')))
-        ]);
+        return Container(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+          decoration: BoxDecoration(
+            color: const Color(0xFFE8F5E9),
+            borderRadius: BorderRadius.circular(12),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: 6,
+                height: 6,
+                decoration: const BoxDecoration(
+                  color: Color(0xFF4CAF50),
+                  shape: BoxShape.circle,
+                ),
+              ),
+              const SizedBox(width: 6),
+              Text(
+                translate('Ready'),
+                style: const TextStyle(
+                  color: Color(0xFF4CAF50),
+                  fontSize: 12,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+            ],
+          ),
+        );
       }
     }
 
     final showOneTime = serverModel.approveMode != 'click' &&
         serverModel.verificationMethod != kUsePermanentPassword;
-    return PaddingCard(
-        title: translate('Your Device'),
-        child: Column(
-          // ID
-          children: [
-            Row(children: [
-              const Icon(Icons.perm_identity,
-                      color: Colors.grey, size: iconSize)
-                  .marginOnly(right: iconMarginRight),
-              Text(
-                translate('ID'),
-                style: textStyleHeading,
-              )
-            ]),
-            Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
-              Text(
-                model.serverId.value.text,
-                style: textStyleValue,
+
+    // 사용자 이름 가져오기
+    final userName = gFFI.userModel.userName.value.isNotEmpty
+        ? gFFI.userModel.userName.value
+        : translate('Your Device');
+
+    return Container(
+      margin: const EdgeInsets.fromLTRB(16, 16, 16, 0),
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: const Color(0xFFFEFEFE),
+        borderRadius: BorderRadius.circular(16),
+        boxShadow: [
+          BoxShadow(
+            color: const Color(0xFF333C87).withValues(alpha: 0.15),
+            blurRadius: 20,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // 제목
+          Text(
+            '$userName${translate("device_suffix")}',
+            style: const TextStyle(
+              fontSize: 18,
+              fontWeight: FontWeight.bold,
+              color: Color(0xFF5F71FF),
+            ),
+          ),
+          const SizedBox(height: 4),
+          // 설명
+          Text(
+            translate('device_access_tip'),
+            style: const TextStyle(
+              fontSize: 13,
+              color: Color(0xFF646368),
+              height: 1.4,
+            ),
+          ),
+          const SizedBox(height: 12),
+          // 연결 상태 배지
+          connectionStatusBadge(),
+          const SizedBox(height: 16),
+          // Device code 섹션
+          Text(
+            translate('Device code'),
+            style: const TextStyle(
+              fontSize: 13,
+              color: Color(0xFF646368),
+            ),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            model.serverId.value.text,
+            style: const TextStyle(
+              fontSize: 22,
+              fontWeight: FontWeight.bold,
+              color: Color(0xFF2F2E31),
+              letterSpacing: 1,
+            ),
+          ),
+          const SizedBox(height: 16),
+          // 구분선
+          Container(
+            height: 1,
+            color: const Color(0xFFE5E5E5),
+          ),
+          const SizedBox(height: 16),
+          // 일회용 비밀번호 섹션 - 레이블, 값, 아이콘 수직 가운데 정렬
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [
+              // 왼쪽: 레이블과 비밀번호 값
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      translate('One-time Password'),
+                      style: const TextStyle(
+                        fontSize: 13,
+                        color: Color(0xFF646368),
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      !showOneTime ? '-' : model.serverPasswd.value.text,
+                      style: const TextStyle(
+                        fontSize: 22,
+                        fontWeight: FontWeight.bold,
+                        color: Color(0xFF2F2E31),
+                        letterSpacing: 2,
+                      ),
+                    ),
+                  ],
+                ),
               ),
-              IconButton(
-                  visualDensity: VisualDensity.compact,
-                  icon: Icon(Icons.copy_outlined),
-                  onPressed: () {
-                    copyToClipboard(model.serverId.value.text.trim());
-                  })
-            ]).marginOnly(left: 39, bottom: 10),
-            // Password
-            Row(children: [
-              const Icon(Icons.lock_outline, color: Colors.grey, size: iconSize)
-                  .marginOnly(right: iconMarginRight),
-              Text(
-                translate('One-time Password'),
-                style: textStyleHeading,
-              )
-            ]),
-            Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
-              Text(
-                !showOneTime ? '-' : model.serverPasswd.value.text,
-                style: textStyleValue,
+              // 오른쪽: 복사 및 새로고침 아이콘
+              if (showOneTime)
+                Row(
+                  children: [
+                    GestureDetector(
+                      onTap: () {
+                        copyToClipboard(model.serverPasswd.value.text.trim());
+                      },
+                      child: const Icon(
+                        Icons.copy_outlined,
+                        size: 20,
+                        color: Color(0xFF8F8E95),
+                      ),
+                    ),
+                    const SizedBox(width: 16),
+                    GestureDetector(
+                      onTap: () => bind.mainUpdateTemporaryPassword(),
+                      child: const Icon(
+                        Icons.refresh,
+                        size: 20,
+                        color: Color(0xFF8F8E95),
+                      ),
+                    ),
+                  ],
+                ),
+            ],
+          ),
+          const SizedBox(height: 20),
+          // 액세스 비활성화 버튼 (홈페이지 연결 버튼 스타일)
+          SizedBox(
+            width: double.infinity,
+            child: ElevatedButton(
+              onPressed: () {
+                _showCaptureWarningDialog(context, serverModel);
+              },
+              style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFF5B7BF8),
+                foregroundColor: Colors.white,
+                elevation: 0,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(8),
+                ),
               ),
-              !showOneTime
-                  ? SizedBox.shrink()
-                  : Row(children: [
-                      IconButton(
-                          visualDensity: VisualDensity.compact,
-                          icon: const Icon(Icons.refresh),
-                          onPressed: () => bind.mainUpdateTemporaryPassword()),
-                      IconButton(
-                          visualDensity: VisualDensity.compact,
-                          icon: Icon(Icons.copy_outlined),
-                          onPressed: () {
-                            copyToClipboard(
-                                model.serverPasswd.value.text.trim());
-                          })
-                    ])
-            ]).marginOnly(left: 40, bottom: 15),
-            ConnectionStateNotification()
-          ],
-        ));
+              child: Text(
+                translate('Disable Access'),
+                style: const TextStyle(
+                  fontSize: 15,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
   }
 }
 
@@ -576,202 +784,645 @@ class _PermissionCheckerState extends State<PermissionChecker> {
   Widget build(BuildContext context) {
     final serverModel = Provider.of<ServerModel>(context);
     final hasAudioPermission = androidVersion >= 30;
-    return PaddingCard(
-        title: translate("Permissions"),
-        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          serverModel.mediaOk
-              ? ElevatedButton.icon(
-                      style: ButtonStyle(
-                          backgroundColor:
-                              MaterialStateProperty.all(Colors.red)),
-                      icon: const Icon(Icons.stop),
-                      onPressed: serverModel.toggleService,
-                      label: Text(translate("Stop service")))
-                  .marginOnly(bottom: 8)
-              : SizedBox.shrink(),
-          PermissionRow(
-              translate("Screen Capture"),
-              serverModel.mediaOk,
-              !serverModel.mediaOk &&
-                      gFFI.userModel.userName.value.isEmpty &&
-                      bind.mainGetLocalOption(key: "show-scam-warning") != "N"
-                  ? () => showScamWarning(context, serverModel)
-                  : serverModel.toggleService),
-          PermissionRow(translate("Input Control"), serverModel.inputOk,
-              serverModel.toggleInput),
-          PermissionRow(translate("Transfer file"), serverModel.fileOk,
-              serverModel.toggleFile),
-          hasAudioPermission
-              ? PermissionRow(translate("Audio Capture"), serverModel.audioOk,
-                  serverModel.toggleAudio)
-              : Row(children: [
-                  Icon(Icons.info_outline).marginOnly(right: 15),
-                  Expanded(
-                      child: Text(
+
+    return Container(
+      margin: const EdgeInsets.fromLTRB(16, 16, 16, 0),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Title
+          Text(
+            translate("Permissions"),
+            style: const TextStyle(
+              fontSize: 16,
+              fontWeight: FontWeight.bold,
+              color: Color(0xFF646368),
+            ),
+          ),
+          const SizedBox(height: 16),
+          // Permission rows
+          _PermissionRowNew(
+            iconPath: 'assets/icons/mobile-access-capture.svg',
+            name: translate("Screen Capture"),
+            isOk: serverModel.mediaOk,
+            onPressed: () => _showCaptureWarningDialog(context, serverModel),
+          ),
+          _PermissionRowNew(
+            iconPath: 'assets/icons/mobile-access-input.svg',
+            name: translate("Input Control"),
+            isOk: serverModel.inputOk,
+            onPressed: serverModel.toggleInput,
+          ),
+          _PermissionRowNew(
+            iconPath: 'assets/icons/mobile-access-filesend.svg',
+            name: translate("Transfer file"),
+            isOk: serverModel.fileOk,
+            onPressed: serverModel.toggleFile,
+          ),
+          if (hasAudioPermission)
+            _PermissionRowNew(
+              iconPath: 'assets/icons/mobile-access-audio.svg',
+              name: translate("Audio Capture"),
+              isOk: serverModel.audioOk,
+              onPressed: serverModel.toggleAudio,
+            )
+          else
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 8),
+              child: Row(children: [
+                const Icon(Icons.info_outline, size: 20, color: Color(0xFF8F8E95))
+                    .marginOnly(right: 12),
+                Expanded(
+                  child: Text(
                     translate("android_version_audio_tip"),
-                    style: const TextStyle(color: MyTheme.darkGray),
-                  ))
-                ]),
-          PermissionRow(translate("Enable clipboard"), serverModel.clipboardOk,
-              serverModel.toggleClipboard),
-        ]));
+                    style: const TextStyle(
+                      color: Color(0xFF646368),
+                      fontSize: 13,
+                    ),
+                  ),
+                ),
+              ]),
+            ),
+          _PermissionRowNew(
+            iconPath: 'assets/icons/mobile-access-clipboard.svg',
+            name: translate("Enable clipboard"),
+            isOk: serverModel.clipboardOk,
+            onPressed: serverModel.toggleClipboard,
+          ),
+        ],
+      ),
+    );
   }
 }
 
-class PermissionRow extends StatelessWidget {
-  const PermissionRow(this.name, this.isOk, this.onPressed, {Key? key})
-      : super(key: key);
-
+class _PermissionRowNew extends StatelessWidget {
+  final String iconPath;
   final String name;
   final bool isOk;
   final VoidCallback onPressed;
 
+  const _PermissionRowNew({
+    required this.iconPath,
+    required this.name,
+    required this.isOk,
+    required this.onPressed,
+  });
+
   @override
   Widget build(BuildContext context) {
-    return SwitchListTile(
-        visualDensity: VisualDensity.compact,
-        contentPadding: EdgeInsets.all(0),
-        title: Text(name),
-        value: isOk,
-        onChanged: (bool value) {
-          onPressed();
-        });
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 8),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: [
+          SvgPicture.asset(
+            iconPath,
+            width: 20,
+            height: 20,
+            colorFilter: const ColorFilter.mode(
+              Color(0xFF5F71FF),
+              BlendMode.srcIn,
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Text(
+              name,
+              style: const TextStyle(
+                fontSize: 15,
+                color: Color(0xFF454447),
+              ),
+            ),
+          ),
+          CmCustomToggle(
+            value: isOk,
+            onChanged: (value) => onPressed(),
+          ),
+        ],
+      ),
+    );
   }
 }
 
-class ConnectionManager extends StatelessWidget {
-  const ConnectionManager({Key? key}) : super(key: key);
+
+class ConnectionManager extends StatefulWidget {
+  ConnectionManager({Key? key}) : super(key: key);
+
+  @override
+  State<ConnectionManager> createState() => _ConnectionManagerState();
+}
+
+class _ConnectionManagerState extends State<ConnectionManager> {
+  final Map<int, bool> _micStates = {};
+  final Map<int, bool> _speakerStates = {};
+  String _savedMicDevice = '';
+
+  @override
+  void initState() {
+    super.initState();
+    _initMicDevice();
+  }
+
+  Future<void> _initMicDevice() async {
+    _savedMicDevice = await bind.getVoiceCallInputDevice(isCm: true);
+    if (_savedMicDevice.isEmpty) {
+      final devices = (await bind.mainGetSoundInputs()).toList();
+      if (devices.isNotEmpty) {
+        _savedMicDevice = devices.first;
+      }
+    }
+  }
+
+  void _toggleMic(int clientId) async {
+    final current = _micStates[clientId] ?? true;
+    setState(() {
+      _micStates[clientId] = !current;
+    });
+    if (!current) {
+      await bind.setVoiceCallInputDevice(isCm: true, device: _savedMicDevice);
+    } else {
+      await bind.setVoiceCallInputDevice(isCm: true, device: '');
+    }
+  }
+
+  void _toggleSpeaker(int clientId) {
+    final current = _speakerStates[clientId] ?? true;
+    setState(() {
+      _speakerStates[clientId] = !current;
+    });
+    bind.cmSwitchPermission(
+      connId: clientId,
+      name: 'audio',
+      enabled: !current,
+    );
+  }
+
+  /// 피어 캐시에서 platform 정보 조회
+  String _getPeerPlatform(String peerId) {
+    try {
+      final peer = bind.mainGetPeerSync(id: peerId);
+      final config = jsonDecode(peer);
+      return config['info']?['platform'] ?? config['platform'] ?? '';
+    } catch (e) {
+      return '';
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
     final serverModel = Provider.of<ServerModel>(context);
+    final authorizedClients =
+        serverModel.clients.where((c) => c.authorized).toList();
+    final Map<String, List<Client>> grouped = {};
+    for (final client in authorizedClients) {
+      grouped.putIfAbsent(client.peerId, () => []).add(client);
+    }
+
+    if (authorizedClients.isEmpty) {
+      return const SizedBox.shrink();
+    }
     return Column(
-        children: serverModel.clients
-            .map((client) => PaddingCard(
-                title: translate(client.isFileTransfer
-                    ? "Transfer file"
-                    : "Share screen"),
-                titleIcon: client.isFileTransfer
-                    ? Icon(Icons.folder_outlined)
-                    : Icon(Icons.mobile_screen_share),
-                child: Column(children: [
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      children: grouped.entries.map((entry) {
+        final clients = entry.value;
+        final primary = clients.first;
+        return _buildClientCard(context, serverModel, primary, clients);
+      }).toList(),
+    );
+  }
+
+  List<Widget> _buildAllSubCards(List<Client> clients, ServerModel serverModel) {
+    final List<Widget> cards = [];
+    for (final client in clients) {
+      cards.add(_buildSubCard(client, serverModel));
+    }
+    for (final client in clients) {
+      if (client.inVoiceCall) {
+        cards.add(_buildVoiceCallCard(client));
+      }
+      if (client.incomingVoiceCall) {
+        cards.add(_buildVoiceCallRequestCard(client, serverModel));
+      }
+    }
+    return cards;
+  }
+
+  /// 음성 채팅 활성 카드
+  Widget _buildVoiceCallCard(Client client) {
+    final isMicOn = _micStates[client.id] ?? true;
+    final isSpeakerOn = _speakerStates[client.id] ?? true;
+
+    return Container(
+      margin: const EdgeInsets.only(top: 12),
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: const Color(0xFFF7F7F7),
+        borderRadius: BorderRadius.circular(16),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              SvgPicture.asset(
+                'assets/icons/mobile-remote-mic.svg',
+                width: 24,
+                height: 24,
+                colorFilter: const ColorFilter.mode(
+                  Color(0xFF5F71FF),
+                  BlendMode.srcIn,
+                ),
+              ),
+              const SizedBox(width: 8),
+              Text(
+                translate('Voice Chatting'),
+                style: const TextStyle(
+                  color: Color(0xFF454447),
+                  fontSize: 14,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.end,
+            children: [
+              // 마이크 토글
+              Container(
+                width: 44,
+                height: 44,
+                decoration: BoxDecoration(
+                  border: Border.all(color: isMicOn ? const Color(0xFFB9B8BF) : const Color(0xFFFE3E3E)),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: InkWell(
+                  onTap: () => _toggleMic(client.id),
+                  borderRadius: BorderRadius.circular(8),
+                  child: Center(
+                    child: SvgPicture.asset(
+                      isMicOn ? 'assets/icons/mobile-remote-mic.svg' : 'assets/icons/mobile-remote-mic-off.svg',
+                      width: 24,
+                      height: 24,
+                      colorFilter: ColorFilter.mode(
+                        isMicOn ? const Color(0xFFB9B8BF) : const Color(0xFFFE3E3E),
+                        BlendMode.srcIn,
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 8),
+              // 스피커 토글
+              Container(
+                width: 44,
+                height: 44,
+                decoration: BoxDecoration(
+                  border: Border.all(color: isSpeakerOn ? const Color(0xFFB9B8BF) : const Color(0xFFFE3E3E)),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: InkWell(
+                  onTap: () => _toggleSpeaker(client.id),
+                  borderRadius: BorderRadius.circular(8),
+                  child: Center(
+                    child: SvgPicture.asset(
+                      isSpeakerOn ? 'assets/icons/mobile-remote-sound.svg' : 'assets/icons/mobile-remote-sound-off.svg',
+                      width: 24,
+                      height: 24,
+                      colorFilter: ColorFilter.mode(
+                        isSpeakerOn ? const Color(0xFFB9B8BF) : const Color(0xFFFE3E3E),
+                        BlendMode.srcIn,
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 8),
+              // 연결 끊기 버튼
+              Container(
+                width: 117,
+                height: 44,
+                decoration: BoxDecoration(
+                  color: const Color(0xFFFE3E3E),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: InkWell(
+                  onTap: () => bind.cmCloseVoiceCall(id: client.id),
+                  borderRadius: BorderRadius.circular(8),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
                     children: [
-                      Expanded(child: ClientInfo(client)),
-                      Expanded(
-                          flex: -1,
-                          child: client.isFileTransfer || !client.authorized
-                              ? const SizedBox.shrink()
-                              : IconButton(
-                                  onPressed: () {
-                                    gFFI.chatModel.changeCurrentKey(
-                                        MessageKey(client.peerId, client.id));
-                                    final bar = navigationBarKey.currentWidget;
-                                    if (bar != null) {
-                                      bar as BottomNavigationBar;
-                                      bar.onTap!(1);
-                                    }
-                                  },
-                                  icon: unreadTopRightBuilder(
-                                      client.unreadChatMessageCount)))
+                      SvgPicture.asset(
+                        'assets/icons/mobile-remote-voice-call-off.svg',
+                        width: 18,
+                        height: 18,
+                        colorFilter: const ColorFilter.mode(
+                          Color(0xFFFEFEFE),
+                          BlendMode.srcIn,
+                        ),
+                      ),
+                      const SizedBox(width: 4),
+                      Text(
+                        translate('Disconnect'),
+                        style: const TextStyle(
+                          color: Color(0xFFFEFEFE),
+                          fontSize: 13,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
                     ],
                   ),
-                  client.authorized
-                      ? const SizedBox.shrink()
-                      : Text(
-                          translate("android_new_connection_tip"),
-                          style: Theme.of(context).textTheme.bodyMedium,
-                        ).marginOnly(bottom: 5),
-                  client.authorized
-                      ? _buildDisconnectButton(client)
-                      : _buildNewConnectionHint(serverModel, client),
-                  if (client.incomingVoiceCall && !client.inVoiceCall)
-                    ..._buildNewVoiceCallHint(context, serverModel, client),
-                ])))
-            .toList());
-  }
-
-  Widget _buildDisconnectButton(Client client) {
-    final disconnectButton = ElevatedButton.icon(
-      style: ButtonStyle(backgroundColor: MaterialStatePropertyAll(Colors.red)),
-      icon: const Icon(Icons.close),
-      onPressed: () {
-        bind.cmCloseConnection(connId: client.id);
-        gFFI.invokeMethod("cancel_notification", client.id);
-      },
-      label: Text(translate("Disconnect")),
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
     );
-    final buttons = [disconnectButton];
-    if (client.inVoiceCall) {
-      buttons.insert(
-        0,
-        ElevatedButton.icon(
-          style: ButtonStyle(
-              backgroundColor: MaterialStatePropertyAll(Colors.red)),
-          icon: const Icon(Icons.phone),
-          label: Text(translate("Stop")),
-          onPressed: () {
-            bind.cmCloseVoiceCall(id: client.id);
-            gFFI.invokeMethod("cancel_notification", client.id);
-          },
-        ),
-      );
-    }
+  }
 
-    if (buttons.length == 1) {
-      return Container(
-        alignment: Alignment.centerRight,
-        child: disconnectButton,
-      );
+  /// 음성 채팅 요청 카드
+  Widget _buildVoiceCallRequestCard(Client client, ServerModel serverModel) {
+    return Container(
+      margin: const EdgeInsets.only(top: 12),
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: const Color(0xFFFFF8E1),
+        borderRadius: BorderRadius.circular(16),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              SvgPicture.asset(
+                'assets/icons/mobile-remote-mic.svg',
+                width: 24,
+                height: 24,
+                colorFilter: const ColorFilter.mode(
+                  Color(0xFFFF9800),
+                  BlendMode.srcIn,
+                ),
+              ),
+              const SizedBox(width: 8),
+              Text(
+                translate('Voice chat request'),
+                style: const TextStyle(
+                  color: Color(0xFF454447),
+                  fontSize: 14,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.end,
+            children: [
+              Container(
+                height: 44,
+                decoration: BoxDecoration(
+                  color: const Color(0xFFFE3E3E),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: InkWell(
+                  onTap: () => serverModel.handleVoiceCall(client, false),
+                  borderRadius: BorderRadius.circular(8),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 16),
+                    child: Center(
+                      child: Text(
+                        translate('Dismiss'),
+                        style: const TextStyle(
+                          color: Color(0xFFFEFEFE),
+                          fontSize: 13,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 8),
+              Container(
+                height: 44,
+                decoration: BoxDecoration(
+                  color: const Color(0xFF5F71FF),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: InkWell(
+                  onTap: () => serverModel.handleVoiceCall(client, true),
+                  borderRadius: BorderRadius.circular(8),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 16),
+                    child: Center(
+                      child: Text(
+                        translate('Accept'),
+                        style: const TextStyle(
+                          color: Color(0xFFFEFEFE),
+                          fontSize: 13,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// 카메라/파일전송/화면공유 서브카드
+  Widget _buildSubCard(Client client, ServerModel serverModel) {
+    String label;
+    String iconPath;
+    if (client.isFileTransfer) {
+      label = translate('File transfer');
+      iconPath = 'assets/icons/mobile-remote-file-sender.svg';
+    } else if (client.isViewCamera) {
+      label = translate('Camera Sharing');
+      iconPath = 'assets/icons/mobile-remote-camera.svg';
     } else {
-      return Row(
-        children: buttons,
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-      );
+      label = translate('Screen sharing');
+      iconPath = 'assets/icons/mobile-remote-screen.svg';
     }
+
+    return Container(
+      margin: const EdgeInsets.only(top: 12),
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: const Color(0xFFF7F7F7),
+        borderRadius: BorderRadius.circular(16),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              SvgPicture.asset(
+                iconPath,
+                width: 24,
+                height: 24,
+                colorFilter: const ColorFilter.mode(
+                  Color(0xFF5F71FF),
+                  BlendMode.srcIn,
+                ),
+              ),
+              const SizedBox(width: 8),
+              Text(
+                label,
+                style: const TextStyle(
+                  color: Color(0xFF454447),
+                  fontSize: 14,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.end,
+            children: [
+              Container(
+                width: 102,
+                height: 44,
+                decoration: BoxDecoration(
+                  color: const Color(0xFFFE3E3E),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: InkWell(
+                  onTap: () {
+                    bind.cmCloseConnection(connId: client.id);
+                    gFFI.invokeMethod("cancel_notification", client.id);
+                  },
+                  borderRadius: BorderRadius.circular(8),
+                  child: Center(
+                    child: Text(
+                      translate('End Access'),
+                      style: const TextStyle(
+                        color: Color(0xFFFEFEFE),
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
   }
 
-  Widget _buildNewConnectionHint(ServerModel serverModel, Client client) {
-    return Row(mainAxisAlignment: MainAxisAlignment.end, children: [
-      TextButton(
-          child: Text(translate("Dismiss")),
-          onPressed: () {
-            serverModel.sendLoginResponse(client, false);
-          }).marginOnly(right: 15),
-      if (serverModel.approveMode != 'password')
-        ElevatedButton.icon(
-            icon: const Icon(Icons.check),
-            label: Text(translate("Accept")),
-            onPressed: () {
-              serverModel.sendLoginResponse(client, true);
-            }),
-    ]);
+  Widget _buildClientCard(BuildContext context, ServerModel serverModel,
+      Client primary, List<Client> clients) {
+    return Container(
+      margin: const EdgeInsets.fromLTRB(16, 16, 16, 0),
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: const Color(0xFFFEFEFE),
+        borderRadius: BorderRadius.circular(16),
+        boxShadow: [
+          BoxShadow(
+            color: const Color(0x26333C87),
+            blurRadius: 15,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // 게스트 정보 라벨
+          Text(
+            translate('Guest Infomation'),
+            style: const TextStyle(
+              color: Color(0xFF646368),
+              fontSize: 14,
+            ),
+          ),
+          const SizedBox(height: 12),
+          // 유저 정보 Row
+          Row(
+            children: [
+              // 피어 OS 아이콘
+              Container(
+                width: 48,
+                height: 48,
+                decoration: BoxDecoration(
+                  color: const Color(0xFFEFF1FF),
+                  borderRadius: BorderRadius.circular(16),
+                ),
+                child: Center(
+                  child: getPlatformImage(
+                    _getPeerPlatform(primary.peerId),
+                    size: 24,
+                    color: const Color(0xFF5F71FF),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 12),
+              // 이름 + 코드
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      '[${primary.name.isEmpty ? 'Unknown' : primary.name}]',
+                      style: const TextStyle(
+                        color: Color(0xFF646368),
+                        fontSize: 15,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      '[${primary.peerId}]',
+                      style: const TextStyle(color: Color(0xFF646368), fontSize: 13),
+                    ),
+                  ],
+                ),
+              ),
+              // 채팅 아이콘
+              SizedBox(
+                width: 40,
+                height: 40,
+                child: InkWell(
+                  onTap: () {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (context) => MobileChatPage(
+                          peerId: primary.peerId,
+                          connId: primary.id,
+                        ),
+                      ),
+                    );
+                  },
+                  borderRadius: BorderRadius.circular(10),
+                  child: SvgPicture.asset(
+                    'assets/icons/mobile-cm-chat.svg',
+                    width: 40,
+                    height: 40,
+                    colorFilter: const ColorFilter.mode(
+                      Color(0xFF8F8E95),
+                      BlendMode.srcIn,
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+          // 서브카드들
+          ..._buildAllSubCards(clients, serverModel),
+        ],
+      ),
+    );
   }
 
-  List<Widget> _buildNewVoiceCallHint(
-      BuildContext context, ServerModel serverModel, Client client) {
-    return [
-      Text(
-        translate("android_new_voice_call_tip"),
-        style: Theme.of(context).textTheme.bodyMedium,
-      ).marginOnly(bottom: 5),
-      Row(mainAxisAlignment: MainAxisAlignment.end, children: [
-        TextButton(
-            child: Text(translate("Dismiss")),
-            onPressed: () {
-              serverModel.handleVoiceCall(client, false);
-            }).marginOnly(right: 15),
-        if (serverModel.approveMode != 'password')
-          ElevatedButton.icon(
-              icon: const Icon(Icons.check),
-              label: Text(translate("Accept")),
-              onPressed: () {
-                serverModel.handleVoiceCall(client, true);
-              }),
-      ])
-    ];
-  }
 }
 
 class PaddingCard extends StatelessWidget {
@@ -919,6 +1570,165 @@ void showScamWarning(BuildContext context, ServerModel serverModel) {
     context: context,
     builder: (BuildContext context) {
       return ScamWarningDialog(serverModel: serverModel);
+    },
+  );
+}
+
+/// 화면 공유 서비스 활성화 경고 다이얼로그
+void _showServiceWarningDialog(BuildContext context, ServerModel serverModel) {
+  showDialog(
+    context: context,
+    barrierDismissible: false,
+    builder: (BuildContext context) {
+      return AlertDialog(
+        backgroundColor: Colors.white,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(16),
+        ),
+        contentPadding: MyTheme.dialogContentPadding(actions: true),
+        actionsPadding: MyTheme.dialogActionsPadding(),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // Warning title
+            Text(
+              translate("Warning"),
+              style: const TextStyle(
+                fontSize: 18,
+                fontWeight: FontWeight.bold,
+                color: Color(0xFFFE6565),
+              ),
+            ),
+            const SizedBox(height: 16),
+            // Main message
+            Text(
+              translate("android_service_will_start"),
+              style: const TextStyle(
+                fontSize: 16,
+                fontWeight: FontWeight.bold,
+                color: Color(0xFF454447),
+              ),
+            ),
+            const SizedBox(height: 8),
+            // Description
+            Text(
+              translate("android_service_will_start_tip"),
+              style: const TextStyle(
+                fontSize: 14,
+                color: Color(0xFF454447),
+                height: 1.5,
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          Row(
+            children: [
+              Expanded(
+                child: dialogButton(
+                  'Cancel',
+                  onPressed: () => Navigator.of(context).pop(),
+                  isOutline: true,
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: dialogButton(
+                  'OK',
+                  onPressed: () {
+                    Navigator.of(context).pop();
+                    serverModel.toggleService();
+                  },
+                ),
+              ),
+            ],
+          ),
+        ],
+      );
+    },
+  );
+}
+
+/// 화면 캡처 토글 경고 다이얼로그
+void _showCaptureWarningDialog(BuildContext context, ServerModel serverModel) {
+  // 현재 상태: mediaOk가 true면 끄기, false면 켜기
+  final isStop = serverModel.mediaOk;
+
+  showDialog(
+    context: context,
+    barrierDismissible: false,
+    builder: (BuildContext context) {
+      return AlertDialog(
+        backgroundColor: Colors.white,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(16),
+        ),
+        contentPadding: MyTheme.dialogContentPadding(actions: true),
+        actionsPadding: MyTheme.dialogActionsPadding(),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // Warning title
+            Text(
+              translate("Warning"),
+              style: const TextStyle(
+                fontSize: 18,
+                fontWeight: FontWeight.bold,
+                color: Color(0xFFFE6565),
+              ),
+            ),
+            const SizedBox(height: 16),
+            // Main message - 끌 때와 켤 때 다른 메시지
+            Text(
+              isStop
+                  ? translate("android_stop_service_tip")
+                  : translate("android_capture_will_start"),
+              style: const TextStyle(
+                fontSize: 16,
+                fontWeight: FontWeight.bold,
+                color: Color(0xFF454447),
+              ),
+            ),
+            if (!isStop) ...[
+              const SizedBox(height: 8),
+              // Description (켤 때만 표시)
+              Text(
+                translate("android_capture_will_start_tip"),
+                style: const TextStyle(
+                  fontSize: 14,
+                  color: Color(0xFF454447),
+                  height: 1.5,
+                ),
+              ),
+            ],
+          ],
+        ),
+        actions: [
+          Row(
+            children: [
+              Expanded(
+                child: dialogButton(
+                  'Cancel',
+                  onPressed: () => Navigator.of(context).pop(),
+                  isOutline: true,
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: dialogButton(
+                  'OK',
+                  onPressed: () {
+                    Navigator.of(context).pop();
+                    serverModel.toggleService();
+                  },
+                ),
+              ),
+            ],
+          ),
+        ],
+      );
     },
   );
 }

@@ -210,8 +210,8 @@ pub struct Connection {
     server: super::ServerPtrWeak,
     hash: Hash,
     read_jobs: Vec<fs::TransferJob>,
-    timer: crate::RustDeskInterval,
-    file_timer: crate::RustDeskInterval,
+    timer: crate::OneDeskInterval,
+    file_timer: crate::OneDeskInterval,
     file_transfer: Option<(String, bool)>,
     view_camera: bool,
     terminal: bool,
@@ -388,8 +388,8 @@ impl Connection {
             server,
             hash,
             read_jobs: Vec::new(),
-            timer: crate::rustdesk_interval(time::interval(SEC30)),
-            file_timer: crate::rustdesk_interval(time::interval(SEC30)),
+            timer: crate::onedesk_interval(time::interval(SEC30)),
+            file_timer: crate::onedesk_interval(time::interval(SEC30)),
             file_transfer: None,
             view_camera: false,
             terminal: false,
@@ -500,7 +500,7 @@ impl Connection {
             conn.send_permission(Permission::BlockInput, false).await;
         }
         let mut test_delay_timer =
-            crate::rustdesk_interval(time::interval_at(Instant::now(), TEST_DELAY_TIMEOUT));
+            crate::onedesk_interval(time::interval_at(Instant::now(), TEST_DELAY_TIMEOUT));
         let mut last_recv_time = Instant::now();
 
         conn.stream.set_send_timeout(
@@ -513,7 +513,7 @@ impl Connection {
 
         #[cfg(not(any(target_os = "android", target_os = "ios")))]
         std::thread::spawn(move || Self::handle_input(_rx_input, tx_cloned));
-        let mut second_timer = crate::rustdesk_interval(time::interval(Duration::from_secs(1)));
+        let mut second_timer = crate::onedesk_interval(time::interval(Duration::from_secs(1)));
 
         #[cfg(feature = "unix-file-copy-paste")]
         let rx_clip_holder;
@@ -764,7 +764,7 @@ impl Connection {
                             }
                         }
                     } else {
-                        conn.file_timer = crate::rustdesk_interval(time::interval_at(Instant::now() + SEC30, SEC30));
+                        conn.file_timer = crate::onedesk_interval(time::interval_at(Instant::now() + SEC30, SEC30));
                     }
                 }
                 Ok(conns) = hbbs_rx.recv() => {
@@ -1373,13 +1373,9 @@ impl Connection {
             pi.hostname = DEVICE_NAME.lock().unwrap().clone();
             pi.platform = "Android".into();
         }
-        #[cfg(all(target_os = "macos", not(feature = "unix-file-copy-paste")))]
-        let platform_additions = serde_json::Map::new();
-        #[cfg(any(
-            target_os = "windows",
-            target_os = "linux",
-            all(target_os = "macos", feature = "unix-file-copy-paste")
-        ))]
+        // 모든 플랫폼에서 mutable로 변경하여 os_version 추가 가능하게 함
+        // Make mutable for all platforms to add os_version
+        #[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos", target_os = "android", target_os = "ios"))]
         let mut platform_additions = serde_json::Map::new();
         #[cfg(target_os = "linux")]
         {
@@ -1391,6 +1387,14 @@ impl Connection {
                 if linux_desktop_manager::is_headless() {
                     platform_additions.insert("headless".into(), json!(true));
                 }
+            }
+            // OS 버전 정보 추가 (예: "Ubuntu 22.04", "Fedora 38")
+            // Add OS version info for peer card display
+            {
+                use hbb_common::sysinfo::System;
+                let sys = System::new();
+                let os_version = sys.long_os_version().unwrap_or_default();
+                platform_additions.insert("os_version".into(), json!(os_version));
             }
         }
         #[cfg(target_os = "windows")]
@@ -1406,6 +1410,44 @@ impl Connection {
                 "supported_privacy_mode_impl".into(),
                 json!(privacy_mode::get_supported_privacy_mode_impl()),
             );
+            // OS 버전 정보 추가 (예: "Windows 10", "Windows 11")
+            // Add OS version info for peer card display
+            {
+                use hbb_common::sysinfo::System;
+                let sys = System::new();
+                let os_version = sys.long_os_version().unwrap_or_default();
+                platform_additions.insert("os_version".into(), json!(os_version));
+            }
+        }
+
+        // macOS용 OS 버전 정보 추가 (예: "macOS 14.0 Sonoma")
+        // Add OS version info for macOS
+        #[cfg(target_os = "macos")]
+        {
+            use hbb_common::sysinfo::System;
+            let sys = System::new();
+            let os_version = sys.long_os_version().unwrap_or_default();
+            platform_additions.insert("os_version".into(), json!(os_version));
+        }
+
+        // Android용 OS 버전 정보 추가 (예: "Android 14")
+        // Add OS version info for Android
+        #[cfg(target_os = "android")]
+        {
+            use hbb_common::sysinfo::System;
+            let sys = System::new();
+            let os_version = sys.long_os_version().unwrap_or_else(|| "Android".to_string());
+            platform_additions.insert("os_version".into(), json!(os_version));
+        }
+
+        // iOS용 OS 버전 정보 추가 (예: "iOS 17.0")
+        // Add OS version info for iOS
+        #[cfg(target_os = "ios")]
+        {
+            use hbb_common::sysinfo::System;
+            let sys = System::new();
+            let os_version = sys.long_os_version().unwrap_or_else(|| "iOS".to_string());
+            platform_additions.insert("os_version".into(), json!(os_version));
         }
 
         #[cfg(any(target_os = "windows", feature = "unix-file-copy-paste"))]
@@ -1431,7 +1473,9 @@ impl Connection {
             platform_additions.insert("support_view_camera".into(), json!(true));
         }
 
-        #[cfg(any(target_os = "linux", target_os = "windows", target_os = "macos"))]
+        // 모든 플랫폼에서 platform_additions 저장
+        // Save platform_additions for all platforms
+        #[cfg(any(target_os = "linux", target_os = "windows", target_os = "macos", target_os = "android", target_os = "ios"))]
         if !platform_additions.is_empty() {
             pi.platform_additions = serde_json::to_string(&platform_additions).unwrap_or("".into());
         }
@@ -1907,6 +1951,32 @@ impl Connection {
         false
     }
 
+    /// 파일 전송 연결 시 같은 피어에서 이미 인증된 연결이 있으면 자동 승인
+    fn should_auto_approve_file_transfer(&self, peer_id: &str) -> bool {
+        // 파일 전송 연결인 경우에만 체크
+        if self.file_transfer.is_none() {
+            log::debug!("should_auto_approve_file_transfer: not a file transfer connection");
+            return false;
+        }
+
+        // 같은 피어 ID에서 인증된 연결(Remote, ViewCamera, Terminal)이 있는지 확인
+        let authed_conns = AUTHED_CONNS.lock().unwrap();
+        log::info!("should_auto_approve_file_transfer: checking peer_id={}, authed_conns count={}", peer_id, authed_conns.len());
+        for conn in authed_conns.iter() {
+            log::info!("  - conn: peer_id={}, conn_type={:?}", conn.session_key.peer_id, conn.conn_type);
+            if (conn.conn_type == AuthConnType::Remote
+                || conn.conn_type == AuthConnType::ViewCamera
+                || conn.conn_type == AuthConnType::Terminal)
+                && conn.session_key.peer_id == peer_id
+            {
+                log::info!("Auto-approving file transfer for peer {} (existing {:?} connection)", peer_id, conn.conn_type);
+                return true;
+            }
+        }
+        log::info!("should_auto_approve_file_transfer: no matching connection found for peer_id={}", peer_id);
+        false
+    }
+
     pub fn permission(enable_prefix_option: &str) -> bool {
         #[cfg(feature = "flutter")]
         #[cfg(not(any(target_os = "android", target_os = "ios")))]
@@ -2170,6 +2240,13 @@ impl Connection {
                 self.send_login_error(crate::client::LOGIN_MSG_OFFLINE)
                     .await;
                 return false;
+            } else if self.should_auto_approve_file_transfer(&lr.my_id) {
+                // 파일 전송 연결이고 같은 피어에서 이미 인증된 원격 연결이 있으면 자동 승인
+                #[cfg(target_os = "linux")]
+                self.linux_headless_handle.wait_desktop_cm_ready().await;
+                self.send_logon_response().await;
+                self.try_start_cm(lr.my_id.clone(), lr.my_name.clone(), self.authorized);
+                return true;
             } else if (password::approve_mode() == ApproveMode::Click
                 && !(crate::get_builtin_option(keys::OPTION_ALLOW_LOGON_SCREEN_PASSWORD) == "Y"
                     && is_logon()))
@@ -2727,7 +2804,7 @@ impl Connection {
                                         let job_type = job.r#type;
                                         self.read_jobs.push(job);
                                         self.file_timer =
-                                            crate::rustdesk_interval(time::interval(MILLI1));
+                                            crate::onedesk_interval(time::interval(MILLI1));
                                         self.post_file_audit(
                                             FileAuditType::RemoteSend,
                                             if job_type == fs::JobType::Printer {
@@ -2745,7 +2822,7 @@ impl Connection {
                             Some(file_action::Union::Receive(r)) => {
                                 // client to server
                                 // note: 1.1.10 introduced identical file detection, which breaks original logic of send/recv files
-                                // whenever got send/recv request, check peer version to ensure old version of rustdesk
+                                // whenever got send/recv request, check peer version to ensure old version of onedesk
                                 let od = can_enable_overwrite_detection(get_version_number(
                                     &self.lr.version,
                                 ));
@@ -2891,7 +2968,7 @@ impl Connection {
                         self.toggle_privacy_mode(t).await;
                     }
                     Some(misc::Union::ChatMessage(c)) => {
-                        self.send_to_cm(ipc::Data::ChatMessage { text: c.text });
+                        self.send_to_cm(ipc::Data::ChatMessage { text: c.text.clone() });
                         self.chat_unanswered = true;
                         self.update_auto_disconnect_timer();
                     }
@@ -3521,7 +3598,7 @@ impl Connection {
                     let name = display.name();
                     #[cfg(windows)]
                     if let Some(_ok) =
-                        virtual_display_manager::rustdesk_idd::change_resolution_if_is_virtual_display(
+                        virtual_display_manager::onedesk_idd::change_resolution_if_is_virtual_display(
                             &name,
                             r.width as _,
                             r.height as _,
@@ -4229,7 +4306,7 @@ impl Connection {
     #[cfg(all(target_os = "windows", feature = "flutter"))]
     async fn send_printer_request(&mut self, data: Vec<u8>) {
         // This path is only used to identify the printer job.
-        let path = format!("RustDesk://FsJob//Printer/{}", get_time());
+        let path = format!("OneDesk://FsJob//Printer/{}", get_time());
 
         let msg = fs::new_send(0, fs::JobType::Printer, path.clone(), 1, false);
         self.send(msg).await;

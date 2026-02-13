@@ -65,7 +65,7 @@ class _FileManagerTabPageState extends State<FileManagerTabPage> {
   void initState() {
     super.initState();
 
-    rustDeskWinManager.setMethodHandler((call, fromWindowId) async {
+    oneDeskWinManager.setMethodHandler((call, fromWindowId) async {
       debugPrint(
           "[FileTransfer] call ${call.method} with args ${call.arguments} from window $fromWindowId to ${windowId()}");
       // for simplify, just replace connectionId
@@ -110,7 +110,7 @@ class _FileManagerTabPageState extends State<FileManagerTabPage> {
   @override
   Widget build(BuildContext context) {
     final child = Scaffold(
-        backgroundColor: Theme.of(context).cardColor,
+        backgroundColor: Theme.of(context).colorScheme.surface,
         body: DesktopTab(
           controller: tabController,
           onWindowCloseButton: handleWindowCloseButton,
@@ -120,13 +120,7 @@ class _FileManagerTabPageState extends State<FileManagerTabPage> {
         ));
     final tabWidget = isLinux
         ? buildVirtualWindowFrame(context, child)
-        : workaroundWindowBorder(
-            context,
-            Container(
-              decoration: BoxDecoration(
-                  border: Border.all(color: MyTheme.color(context).border!)),
-              child: child,
-            ));
+        : workaroundWindowBorder(context, child);
     return isMacOS || kUseCompatibleUiMode
         ? tabWidget
         : SubWindowDragToResizeArea(

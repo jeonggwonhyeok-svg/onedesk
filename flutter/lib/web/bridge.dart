@@ -50,7 +50,7 @@ class EventToUI_Texture implements EventToUI {
   bool get field1 => f1;
 }
 
-class RustdeskImpl {
+class OnedeskImpl {
   Future<void> stopGlobalEventStream({required String appType, dynamic hint}) {
     throw UnimplementedError("stopGlobalEventStream");
   }
@@ -908,6 +908,11 @@ class RustdeskImpl {
     return js.context.callMethod('getByName', ['option:local', key]);
   }
 
+  /// 파일에서 직접 옵션을 읽음 (웹에서는 mainGetLocalOption과 동일)
+  String mainGetLocalOptionFromFile({required String key, dynamic hint}) {
+    return mainGetLocalOption(key: key, hint: hint);
+  }
+
   // Do not return the real environment variables.
   // Use the global variable as the environment variable in web.
   String mainGetEnv({required String key, dynamic hint}) {
@@ -1609,8 +1614,8 @@ class RustdeskImpl {
   }
 
   bool isCustomClient({dynamic hint}) {
-    // is_custom_client() checks if app name is not "RustDesk"
-    return mainGetAppNameSync(hint: hint) != "RustDesk";
+    // is_custom_client() checks if app name is not "OneDesk"
+    return mainGetAppNameSync(hint: hint) != "OneDesk";
   }
 
   bool isDisableSettings({dynamic hint}) {

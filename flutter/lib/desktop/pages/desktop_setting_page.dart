@@ -11,7 +11,6 @@ import 'package:flutter_hbb/common/widgets/setting_widgets.dart';
 import 'package:flutter_hbb/consts.dart';
 import 'package:flutter_hbb/desktop/pages/desktop_home_page.dart';
 import 'package:flutter_hbb/desktop/pages/desktop_tab_page.dart';
-import 'package:flutter_hbb/desktop/widgets/remote_toolbar.dart';
 import 'package:flutter_hbb/mobile/widgets/dialog.dart';
 import 'package:flutter_hbb/models/platform_model.dart';
 import 'package:flutter_hbb/models/printer_model.dart';
@@ -19,6 +18,7 @@ import 'package:flutter_hbb/models/server_model.dart';
 import 'package:flutter_hbb/models/state_model.dart';
 import 'package:flutter_hbb/plugin/manager.dart';
 import 'package:flutter_hbb/plugin/widgets/desktop_settings.dart';
+import 'package:flutter_svg/flutter_svg.dart';
 import 'package:get/get.dart';
 import 'package:provider/provider.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -26,28 +26,94 @@ import 'package:url_launcher/url_launcher_string.dart';
 
 import '../../common/widgets/dialog.dart';
 import '../../common/widgets/login.dart';
+import '../../common/widgets/content_card.dart';
+import '../../common/widgets/styled_form_widgets.dart';
+import '../../common/widgets/styled_text_field.dart';
 
-const double _kTabWidth = 200;
-const double _kTabHeight = 42;
-const double _kCardFixedWidth = 540;
-const double _kCardLeftMargin = 15;
-const double _kContentHMargin = 15;
+// 설정 페이지 레이아웃 상수
+const double _kCardFixedWidth = 540; // 카드 고정 너비
+const double _kCardLeftMargin = 15; // 카드 좌측 마진
+const double _kContentHMargin = 15; // 콘텐츠 수평 마진
 const double _kContentHSubMargin = _kContentHMargin + 33;
-const double _kCheckBoxLeftMargin = 10;
-const double _kRadioLeftMargin = 10;
 const double _kListViewBottomMargin = 15;
-const double _kTitleFontSize = 20;
-const double _kContentFontSize = 15;
-const Color _accentColor = MyTheme.accent;
+const double _kContentFontSize = 16; // 콘텐츠 폰트 크기 (테마와 동일)
+
+// 설정 페이지 테마 색상 (테마와 일치하는 색상 사용)
+const Color _accentColor = Color(0xFF5F71FF); // 메인 색상 (테마 색상)
+const Color _primaryColor = Color(0xFF5B7BF8); // 버튼 기본 색상
+const Color _accentColorLighter = Color(0xFFEFF1FF); // 연한 보라색 (특수 섹션 배경)
+const Color _cardBackgroundColor = Colors.white; // 카드 배경색
 const String _kSettingPageControllerTag = 'settingPageController';
 const String _kSettingPageTabKeyTag = 'settingPageTabKey';
 
+/// 옵션 정보를 저장하는 클래스
+class _OptionNotifierInfo {
+  final ValueNotifier<bool> notifier;
+  final String optionKey;
+  final bool isServer;
+  final bool reversed;
+
+  _OptionNotifierInfo({
+    required this.notifier,
+    required this.optionKey,
+    required this.isServer,
+    required this.reversed,
+  });
+
+  /// 스토리지(파일)에서 현재 값 읽기 (캐시 우회)
+  bool readFromStorage() {
+    // 다른 프로세스(CM 창 등)에서 변경된 값을 읽기 위해 파일에서 직접 읽음
+    return isServer
+        ? mainGetBoolOptionSync(optionKey)
+        : mainGetLocalBoolOptionFromFile(optionKey);
+  }
+}
+
+/// 전역 옵션 ValueNotifier 저장소 (설정 동기화용)
+final Map<String, _OptionNotifierInfo> _globalOptionNotifierMap = {};
+
+/// 옵션의 ValueNotifier 가져오기 또는 생성
+ValueNotifier<bool> _getOrCreateOptionNotifier(
+    String notifierKey, String optionKey, bool isServer, bool reversed) {
+  if (!_globalOptionNotifierMap.containsKey(notifierKey)) {
+    final storageValue = isServer
+        ? mainGetBoolOptionSync(optionKey)
+        : mainGetLocalBoolOptionSync(optionKey);
+    _globalOptionNotifierMap[notifierKey] = _OptionNotifierInfo(
+      notifier: ValueNotifier<bool>(reversed ? !storageValue : storageValue),
+      optionKey: optionKey,
+      isServer: isServer,
+      reversed: reversed,
+    );
+  }
+  return _globalOptionNotifierMap[notifierKey]!.notifier;
+}
+
+/// 모든 옵션의 ValueNotifier를 스토리지에서 새로고침 (다른 창에서 변경된 경우)
+/// 설정 페이지가 열릴 때 호출하여 CM 창 등 다른 창에서 변경된 옵션을 반영
+void _refreshAllOptionNotifiersFromStorage() {
+  for (final entry in _globalOptionNotifierMap.entries) {
+    try {
+      final info = entry.value;
+      final storageValue = info.readFromStorage();
+      final syncValue = info.reversed ? !storageValue : storageValue;
+      if (info.notifier.value != syncValue) {
+        info.notifier.value = syncValue;
+      }
+    } catch (e) {
+      // 파일 읽기 실패 시 무시 (캐시 값 유지)
+      continue;
+    }
+  }
+}
+
+/// 설정 탭 정보 클래스
+/// SVG 아이콘 경로를 사용하여 탭을 표시
 class _TabInfo {
-  late final SettingsTabKey key;
-  late final String label;
-  late final IconData unselected;
-  late final IconData selected;
-  _TabInfo(this.key, this.label, this.unselected, this.selected);
+  late final SettingsTabKey key; // 탭 키
+  late final String label; // 탭 라벨
+  late final String iconPath; // SVG 아이콘 경로
+  _TabInfo(this.key, this.label, this.iconPath);
 }
 
 enum SettingsTabKey {
@@ -63,6 +129,7 @@ enum SettingsTabKey {
 
 class DesktopSettingPage extends StatefulWidget {
   final SettingsTabKey initialTabkey;
+  // 설정 탭 목록 (네트워크, 계정 탭 제거됨)
   static final List<SettingsTabKey> tabKeys = [
     SettingsTabKey.general,
     if (!isWeb &&
@@ -70,13 +137,15 @@ class DesktopSettingPage extends StatefulWidget {
         !bind.isDisableSettings() &&
         bind.mainGetBuildinOption(key: kOptionHideSecuritySetting) != 'Y')
       SettingsTabKey.safety,
-    if (!bind.isDisableSettings() &&
-        bind.mainGetBuildinOption(key: kOptionHideNetworkSetting) != 'Y')
-      SettingsTabKey.network,
+    // 네트워크 탭 제거됨
+    // if (!bind.isDisableSettings() &&
+    //     bind.mainGetBuildinOption(key: kOptionHideNetworkSetting) != 'Y')
+    //   SettingsTabKey.network,
     if (!bind.isIncomingOnly()) SettingsTabKey.display,
     if (!isWeb && !bind.isIncomingOnly() && bind.pluginFeatureIsEnabled())
       SettingsTabKey.plugin,
-    if (!bind.isDisableAccount()) SettingsTabKey.account,
+    // 계정 탭 제거됨
+    // if (!bind.isDisableAccount()) SettingsTabKey.account,
     if (isWindows &&
         bind.mainGetBuildinOption(key: kOptionHideRemotePrinterSetting) != 'Y')
       SettingsTabKey.printer,
@@ -151,6 +220,8 @@ class _DesktopSettingPageState extends State<DesktopSettingPage>
     super.didChangeAppLifecycleState(state);
     if (state == AppLifecycleState.resumed) {
       shouldBeBlocked(_block, canBeBlocked);
+      // 앱이 포커스 받을 때 다른 창에서 변경된 옵션 값 새로고침
+      _refreshAllOptionNotifiersFromStorage();
     }
   }
 
@@ -158,6 +229,8 @@ class _DesktopSettingPageState extends State<DesktopSettingPage>
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    // 설정 페이지 열릴 때 다른 창(CM 등)에서 변경된 옵션 값을 파일에서 읽어옴
+    _refreshAllOptionNotifiersFromStorage();
     _videoConnTimer =
         periodic_immediate(Duration(milliseconds: 1000), () async {
       if (!mounted) {
@@ -176,41 +249,51 @@ class _DesktopSettingPageState extends State<DesktopSettingPage>
     _videoConnTimer?.cancel();
   }
 
+  /// 설정 탭 목록 생성
+  /// 각 탭에 해당하는 SVG 아이콘 경로 지정
   List<_TabInfo> _settingTabs() {
     final List<_TabInfo> settingTabs = <_TabInfo>[];
     for (final tab in DesktopSettingPage.tabKeys) {
       switch (tab) {
         case SettingsTabKey.general:
-          settingTabs.add(_TabInfo(
-              tab, 'General', Icons.settings_outlined, Icons.settings));
+          // 일반 설정 - setting-left-normal.svg 아이콘 사용
+          settingTabs.add(
+              _TabInfo(tab, 'General', 'assets/icons/setting-left-normal.svg'));
           break;
         case SettingsTabKey.safety:
-          settingTabs.add(_TabInfo(tab, 'Security',
-              Icons.enhanced_encryption_outlined, Icons.enhanced_encryption));
+          // 보안 설정 - setting-left-security.svg 아이콘 사용
+          settingTabs.add(_TabInfo(
+              tab, 'Security', 'assets/icons/setting-left-security.svg'));
           break;
         case SettingsTabKey.network:
-          settingTabs
-              .add(_TabInfo(tab, 'Network', Icons.link_outlined, Icons.link));
+          // 네트워크 설정 - 일반 아이콘 재사용
+          settingTabs.add(
+              _TabInfo(tab, 'Network', 'assets/icons/setting-left-normal.svg'));
           break;
         case SettingsTabKey.display:
-          settingTabs.add(_TabInfo(tab, 'Display',
-              Icons.desktop_windows_outlined, Icons.desktop_windows));
+          // 디스플레이 설정 - setting-left-display.svg 아이콘 사용
+          settingTabs.add(_TabInfo(
+              tab, 'Display', 'assets/icons/setting-left-display.svg'));
           break;
         case SettingsTabKey.plugin:
-          settingTabs.add(_TabInfo(
-              tab, 'Plugin', Icons.extension_outlined, Icons.extension));
+          // 플러그인 설정 - 일반 아이콘 재사용
+          settingTabs.add(
+              _TabInfo(tab, 'Plugin', 'assets/icons/setting-left-normal.svg'));
           break;
         case SettingsTabKey.account:
+          // 계정 설정 - 일반 아이콘 재사용
           settingTabs.add(
-              _TabInfo(tab, 'Account', Icons.person_outline, Icons.person));
+              _TabInfo(tab, 'Account', 'assets/icons/setting-left-normal.svg'));
           break;
         case SettingsTabKey.printer:
-          settingTabs
-              .add(_TabInfo(tab, 'Printer', Icons.print_outlined, Icons.print));
+          // 프린터 설정 - setting-left-printer.svg 아이콘 사용
+          settingTabs.add(_TabInfo(
+              tab, 'Printer', 'assets/icons/setting-left-printer.svg'));
           break;
         case SettingsTabKey.about:
-          settingTabs
-              .add(_TabInfo(tab, 'About', Icons.info_outline, Icons.info));
+          // 정보 설정 - setting-left-Info.svg 아이콘 사용
+          settingTabs.add(
+              _TabInfo(tab, 'About', 'assets/icons/setting-left-Info.svg'));
           break;
       }
     }
@@ -276,23 +359,31 @@ class _DesktopSettingPageState extends State<DesktopSettingPage>
   @override
   Widget build(BuildContext context) {
     super.build(context);
+    final theme = MyTheme.settingTab(context);
     return Scaffold(
-      backgroundColor: Theme.of(context).colorScheme.background,
+      backgroundColor: theme.contentBackgroundColor,
       body: _buildBlock(
         children: <Widget>[
-          SizedBox(
-            width: _kTabWidth,
+          // 좌측 사이드바 (탭 메뉴) - 헤더 제거됨
+          Container(
+            width: theme.sidebarWidth,
+            color: theme.sidebarBackgroundColor,
+            padding: const EdgeInsets.only(top: 16), // 상단 여백
             child: Column(
               children: [
-                _header(context),
                 Flexible(child: _listView(tabs: _settingTabs())),
               ],
             ),
           ),
-          const VerticalDivider(width: 1),
+          // 사이드바와 콘텐츠 구분선
+          Container(
+            width: 1,
+            color: const Color(0xFFE2E8F0), // 연한 구분선
+          ),
+          // 우측 콘텐츠 영역
           Expanded(
             child: Container(
-              color: Theme.of(context).scaffoldBackgroundColor,
+              color: theme.contentBackgroundColor,
               child: PageView(
                 controller: controller,
                 physics: NeverScrollableScrollPhysics(),
@@ -305,45 +396,6 @@ class _DesktopSettingPageState extends State<DesktopSettingPage>
     );
   }
 
-  Widget _header(BuildContext context) {
-    final settingsText = Text(
-      translate('Settings'),
-      textAlign: TextAlign.left,
-      style: const TextStyle(
-        color: _accentColor,
-        fontSize: _kTitleFontSize,
-        fontWeight: FontWeight.w400,
-      ),
-    );
-    return Row(
-      children: [
-        if (isWeb)
-          IconButton(
-            onPressed: () {
-              if (Navigator.canPop(context)) {
-                Navigator.pop(context);
-              }
-            },
-            icon: Icon(Icons.arrow_back),
-          ).marginOnly(left: 5),
-        if (isWeb)
-          SizedBox(
-            height: 62,
-            child: Align(
-              alignment: Alignment.center,
-              child: settingsText,
-            ),
-          ).marginOnly(left: 20),
-        if (!isWeb)
-          SizedBox(
-            height: 62,
-            child: settingsText,
-          ).marginOnly(left: 20, top: 10),
-        const Spacer(),
-      ],
-    );
-  }
-
   Widget _listView({required List<_TabInfo> tabs}) {
     final scrollController = ScrollController();
     return ListView(
@@ -352,42 +404,73 @@ class _DesktopSettingPageState extends State<DesktopSettingPage>
     );
   }
 
+  /// 개별 탭 아이템 위젯
+  /// 선택된 탭은 테마 색상으로 표시
   Widget _listItem({required _TabInfo tab}) {
     return Obx(() {
       bool selected = tab.key == selectedTab.value;
-      return SizedBox(
-        width: _kTabWidth,
-        height: _kTabHeight,
-        child: InkWell(
-          onTap: () {
-            if (selectedTab.value != tab.key) {
-              int index = DesktopSettingPage.tabKeys.indexOf(tab.key);
-              if (index == -1) {
-                return;
+      final theme = MyTheme.settingTab(context);
+      return Container(
+        width: theme.sidebarWidth,
+        height: theme.height,
+        margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 2),
+        child: Material(
+          color: Colors.transparent,
+          borderRadius: BorderRadius.circular(theme.borderRadius),
+          child: InkWell(
+            borderRadius: BorderRadius.circular(theme.borderRadius),
+            onTap: () {
+              if (selectedTab.value != tab.key) {
+                int index = DesktopSettingPage.tabKeys.indexOf(tab.key);
+                if (index == -1) {
+                  return;
+                }
+                controller.jumpToPage(index);
               }
-              controller.jumpToPage(index);
-            }
-            selectedTab.value = tab.key;
-          },
-          child: Row(children: [
-            Container(
-              width: 4,
-              height: _kTabHeight * 0.7,
-              color: selected ? _accentColor : null,
+              selectedTab.value = tab.key;
+            },
+            child: Container(
+              decoration: BoxDecoration(
+                // 선택된 탭은 테마 배경색
+                color: selected
+                    ? theme.selectedBackgroundColor
+                    : Colors.transparent,
+                borderRadius: BorderRadius.circular(theme.borderRadius),
+              ),
+              padding:
+                  EdgeInsets.symmetric(horizontal: theme.horizontalPadding),
+              child: Row(children: [
+                // SVG 아이콘 표시 (20x20 고정)
+                SvgPicture.asset(
+                  tab.iconPath,
+                  width: 20,
+                  height: 20,
+                  colorFilter: ColorFilter.mode(
+                    // 테마에서 아이콘 색상 가져오기
+                    selected
+                        ? theme.selectedIconColor
+                        : theme.unselectedIconColor,
+                    BlendMode.srcIn,
+                  ),
+                ),
+                const SizedBox(width: 12),
+                // 탭 라벨
+                Expanded(
+                  child: Text(
+                    translate(tab.label),
+                    style: TextStyle(
+                      // 테마에서 텍스트 색상 가져오기
+                      color: selected
+                          ? theme.selectedTextColor
+                          : theme.unselectedTextColor,
+                      fontWeight: FontWeight.w500, // 보통 두께
+                      fontSize: theme.fontSize,
+                    ),
+                  ),
+                ),
+              ]),
             ),
-            Icon(
-              selected ? tab.selected : tab.unselected,
-              color: selected ? _accentColor : null,
-              size: 20,
-            ).marginOnly(left: 13, right: 10),
-            Text(
-              translate(tab.label),
-              style: TextStyle(
-                  color: selected ? _accentColor : null,
-                  fontWeight: FontWeight.w400,
-                  fontSize: _kContentFontSize),
-            ),
-          ]),
+          ),
         ),
       );
     });
@@ -403,10 +486,30 @@ class _General extends StatefulWidget {
   State<_General> createState() => _GeneralState();
 }
 
-class _GeneralState extends State<_General> {
+class _GeneralState extends State<_General> with WidgetsBindingObserver {
   final RxBool serviceStop =
       isWeb ? RxBool(false) : Get.find<RxBool>(tag: 'stop-service');
   RxBool serviceBtnEnabled = true.obs;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      // 앱이 다시 활성화되면 새로고침
+      setState(() {});
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -414,62 +517,15 @@ class _GeneralState extends State<_General> {
     return ListView(
       controller: scrollController,
       children: [
-        if (!isWeb) service(),
-        theme(),
         _Card(title: 'Language', children: [language()]),
         if (!isWeb) hwcodec(),
         if (!isWeb) audio(context),
         if (!isWeb) record(context),
+        if (!isWeb) screenshot(context),
         if (!isWeb) WaylandCard(),
         other()
       ],
     ).marginOnly(bottom: _kListViewBottomMargin);
-  }
-
-  Widget theme() {
-    final current = MyTheme.getThemeModePreference().toShortString();
-    onChanged(String value) async {
-      await MyTheme.changeDarkMode(MyTheme.themeModeFromString(value));
-      setState(() {});
-    }
-
-    final isOptFixed = isOptionFixed(kCommConfKeyTheme);
-    return _Card(title: 'Theme', children: [
-      _Radio<String>(context,
-          value: 'light',
-          groupValue: current,
-          label: 'Light',
-          onChanged: isOptFixed ? null : onChanged),
-      _Radio<String>(context,
-          value: 'dark',
-          groupValue: current,
-          label: 'Dark',
-          onChanged: isOptFixed ? null : onChanged),
-      _Radio<String>(context,
-          value: 'system',
-          groupValue: current,
-          label: 'Follow System',
-          onChanged: isOptFixed ? null : onChanged),
-    ]);
-  }
-
-  Widget service() {
-    if (bind.isOutgoingOnly()) {
-      return const Offstage();
-    }
-
-    return _Card(title: 'Service', children: [
-      Obx(() => _Button(serviceStop.value ? 'Start' : 'Stop', () {
-            () async {
-              serviceBtnEnabled.value = false;
-              await start_service(serviceStop.value);
-              // enable the button after 1 second
-              Future.delayed(const Duration(seconds: 1), () {
-                serviceBtnEnabled.value = true;
-              });
-            }();
-          }, enabled: serviceBtnEnabled.value))
-    ]);
   }
 
   Widget other() {
@@ -561,18 +617,12 @@ class _GeneralState extends State<_General> {
       children.add(_OptionCheckBox(
           context, 'Allow linux headless', kOptionAllowLinuxHeadless));
     }
-    children.add(_OptionCheckBox(
-      context,
-      'note-at-conn-end-tip',
-      kOptionAllowAskForNoteAtEndOfConnection,
-      isServer: false,
-    ));
     return _Card(title: 'Other', children: children);
   }
 
   Widget wallpaper() {
     if (bind.isOutgoingOnly()) {
-      return const Offstage();
+      return const SizedBox.shrink();
     }
 
     return futureBuilder(future: () async {
@@ -583,7 +633,7 @@ class _GeneralState extends State<_General> {
         bool value = mainGetBoolOptionSync(kOptionAllowRemoveWallpaper);
         return Row(
           children: [
-            Flexible(
+            Expanded(
               child: _OptionCheckBox(
                 context,
                 'Remove wallpaper during incoming sessions',
@@ -600,12 +650,12 @@ class _GeneralState extends State<_General> {
                 onPressed: () {
                   bind.mainTestWallpaper(second: 5);
                 },
-              )
+              ),
           ],
         );
       }
 
-      return Offstage();
+      return const SizedBox.shrink();
     });
   }
 
@@ -643,35 +693,35 @@ class _GeneralState extends State<_General> {
           setDevice(key);
           setState(() {});
         },
-      ).marginOnly(left: _kContentHMargin);
+      );
       return _Card(title: 'Audio Input Device', children: [child]);
     }
 
     return AudioInput(builder: builder, isCm: false, isVoiceCall: false);
   }
 
+  /// 녹화 설정 위젯
+  /// 체크박스 + 수신/발신 경로를 하나의 보라색 컨테이너에
   Widget record(BuildContext context) {
-    final showRootDir = isWindows && bind.mainIsInstalled();
     return futureBuilder(future: () async {
-      String user_dir = bind.mainVideoSaveDirectory(root: false);
-      String root_dir =
-          showRootDir ? bind.mainVideoSaveDirectory(root: true) : '';
-      bool user_dir_exists = await Directory(user_dir).exists();
-      bool root_dir_exists =
-          showRootDir ? await Directory(root_dir).exists() : false;
+      String incoming_dir = bind.mainVideoSaveDirectory(root: true);
+      String outgoing_dir = bind.mainVideoSaveDirectory(root: false);
+      bool incoming_dir_exists = await Directory(incoming_dir).exists();
+      bool outgoing_dir_exists = await Directory(outgoing_dir).exists();
       return {
-        'user_dir': user_dir,
-        'root_dir': root_dir,
-        'user_dir_exists': user_dir_exists,
-        'root_dir_exists': root_dir_exists,
+        'incoming_dir': incoming_dir,
+        'outgoing_dir': outgoing_dir,
+        'incoming_dir_exists': incoming_dir_exists,
+        'outgoing_dir_exists': outgoing_dir_exists,
       };
     }(), hasData: (data) {
       Map<String, dynamic> map = data as Map<String, dynamic>;
-      String user_dir = map['user_dir']!;
-      String root_dir = map['root_dir']!;
-      bool root_dir_exists = map['root_dir_exists']!;
-      bool user_dir_exists = map['user_dir_exists']!;
+      String incoming_dir = map['incoming_dir']!;
+      String outgoing_dir = map['outgoing_dir']!;
+      bool incoming_dir_exists = map['incoming_dir_exists']!;
+      bool outgoing_dir_exists = map['outgoing_dir_exists']!;
       return _Card(title: 'Recording', children: [
+        // 체크박스 영역 (흰 배경)
         if (!bind.isOutgoingOnly())
           _OptionCheckBox(context, 'Automatically record incoming sessions',
               kOptionAllowAutoRecordIncoming),
@@ -679,70 +729,232 @@ class _GeneralState extends State<_General> {
           _OptionCheckBox(context, 'Automatically record outgoing sessions',
               kOptionAllowAutoRecordOutgoing,
               isServer: false),
-        if (showRootDir && !bind.isOutgoingOnly())
-          Row(
+        // 녹화 경로 컨테이너 (보라색 배경)
+        Builder(builder: (context) {
+          final cardTheme = Theme.of(context).extension<ContentCardTheme>() ??
+              ContentCardTheme.light;
+          return Container(
+            padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 20),
+            decoration: BoxDecoration(
+              color: _accentColorLighter,
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                // 녹화 경로 타이틀
+                Text(
+                  translate('Recording Path'),
+                  style: TextStyle(
+                    color: _primaryColor,
+                    fontSize: cardTheme.titleFontSize,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                const SizedBox(height: 12),
+                // 수신 경로
+                if (!bind.isOutgoingOnly())
+                  Row(
+                    children: [
+                      Text(
+                        '${translate("Incoming")}:',
+                        style: const TextStyle(
+                          color: Color(0xFF475569),
+                          fontSize: _kContentFontSize,
+                        ),
+                      ),
+                      Expanded(
+                        child: GestureDetector(
+                            onTap: incoming_dir_exists
+                                ? () => launchUrl(Uri.file(incoming_dir))
+                                : null,
+                            child: Text(
+                              incoming_dir,
+                              softWrap: true,
+                              style: TextStyle(
+                                color: incoming_dir_exists
+                                    ? _accentColor
+                                    : const Color(0xFF64748B),
+                                decoration: incoming_dir_exists
+                                    ? TextDecoration.underline
+                                    : null,
+                                fontSize: _kContentFontSize,
+                              ),
+                            )).marginOnly(left: 10),
+                      ),
+                      StyledCompactButton(
+                        label: translate('Change'),
+                        padding: const EdgeInsets.symmetric(
+                            vertical: 10, horizontal: 20),
+                        onPressed: isOptionFixed(
+                                kOptionVideoSaveDirectoryIncoming)
+                            ? null
+                            : () async {
+                                String? initialDirectory;
+                                if (await Directory.fromUri(
+                                        Uri.directory(incoming_dir))
+                                    .exists()) {
+                                  initialDirectory = incoming_dir;
+                                }
+                                String? selectedDirectory =
+                                    await FilePicker.platform.getDirectoryPath(
+                                        initialDirectory: initialDirectory);
+                                if (selectedDirectory != null) {
+                                  await bind.mainSetLocalOption(
+                                      key: kOptionVideoSaveDirectoryIncoming,
+                                      value: selectedDirectory);
+                                  setState(() {});
+                                }
+                              },
+                        fontSize: _kContentFontSize,
+                      ).marginOnly(left: 10),
+                    ],
+                  ),
+                // 수신/발신 사이 간격
+                if (!bind.isOutgoingOnly() && !bind.isIncomingOnly())
+                  const SizedBox(height: 12),
+                // 발신 경로
+                if (!bind.isIncomingOnly())
+                  Row(
+                    children: [
+                      Text(
+                        '${translate("Outgoing")}:',
+                        style: const TextStyle(
+                          color: Color(0xFF475569),
+                          fontSize: _kContentFontSize,
+                        ),
+                      ),
+                      Expanded(
+                        child: GestureDetector(
+                            onTap: outgoing_dir_exists
+                                ? () => launchUrl(Uri.file(outgoing_dir))
+                                : null,
+                            child: Text(
+                              outgoing_dir,
+                              softWrap: true,
+                              style: TextStyle(
+                                color: outgoing_dir_exists
+                                    ? _accentColor
+                                    : const Color(0xFF64748B),
+                                decoration: outgoing_dir_exists
+                                    ? TextDecoration.underline
+                                    : null,
+                                fontSize: _kContentFontSize,
+                              ),
+                            )).marginOnly(left: 10),
+                      ),
+                      StyledCompactButton(
+                        label: translate('Change'),
+                        padding: const EdgeInsets.symmetric(
+                            vertical: 10, horizontal: 20),
+                        onPressed: isOptionFixed(
+                                kOptionVideoSaveDirectoryOutgoing)
+                            ? null
+                            : () async {
+                                String? initialDirectory;
+                                if (await Directory.fromUri(
+                                        Uri.directory(outgoing_dir))
+                                    .exists()) {
+                                  initialDirectory = outgoing_dir;
+                                }
+                                String? selectedDirectory =
+                                    await FilePicker.platform.getDirectoryPath(
+                                        initialDirectory: initialDirectory);
+                                if (selectedDirectory != null) {
+                                  await bind.mainSetLocalOption(
+                                      key: kOptionVideoSaveDirectoryOutgoing,
+                                      value: selectedDirectory);
+                                  setState(() {});
+                                }
+                              },
+                        fontSize: _kContentFontSize,
+                      ).marginOnly(left: 10),
+                    ],
+                  ),
+              ],
+            ),
+          );
+        }),
+      ]);
+    });
+  }
+
+  /// 스크린샷 설정 위젯
+  Widget screenshot(BuildContext context) {
+    return futureBuilder(future: () async {
+      String screenshot_dir = bind.mainScreenshotSaveDirectory();
+      bool screenshot_dir_exists = await Directory(screenshot_dir).exists();
+      return {
+        'screenshot_dir': screenshot_dir,
+        'screenshot_dir_exists': screenshot_dir_exists,
+      };
+    }(), hasData: (data) {
+      Map<String, dynamic> map = data as Map<String, dynamic>;
+      String screenshot_dir = map['screenshot_dir']!;
+      bool screenshot_dir_exists = map['screenshot_dir_exists']!;
+      return _Card(title: 'Screenshot', children: [
+        Container(
+          padding: const EdgeInsets.all(20),
+          decoration: BoxDecoration(
+            color: _accentColorLighter,
+            borderRadius: BorderRadius.circular(8),
+          ),
+          child: Row(
             children: [
               Text(
-                  '${translate(bind.isIncomingOnly() ? "Directory" : "Incoming")}:'),
+                '${translate("Directory")}:',
+                style: const TextStyle(
+                  color: Color(0xFF475569),
+                  fontSize: _kContentFontSize,
+                ),
+              ),
               Expanded(
                 child: GestureDetector(
-                    onTap: root_dir_exists
-                        ? () => launchUrl(Uri.file(root_dir))
+                    onTap: screenshot_dir_exists
+                        ? () => launchUrl(Uri.file(screenshot_dir))
                         : null,
                     child: Text(
-                      root_dir,
+                      screenshot_dir,
                       softWrap: true,
-                      style: root_dir_exists
-                          ? const TextStyle(
-                              decoration: TextDecoration.underline)
-                          : null,
+                      style: TextStyle(
+                        color: screenshot_dir_exists
+                            ? _accentColor
+                            : const Color(0xFF64748B),
+                        decoration: screenshot_dir_exists
+                            ? TextDecoration.underline
+                            : null,
+                        fontSize: _kContentFontSize,
+                      ),
                     )).marginOnly(left: 10),
               ),
+              StyledCompactButton(
+                label: translate('Change'),
+                padding:
+                    const EdgeInsets.symmetric(vertical: 10, horizontal: 20),
+                onPressed: isOptionFixed(kOptionScreenshotSaveDirectory)
+                    ? null
+                    : () async {
+                        String? initialDirectory;
+                        if (await Directory.fromUri(
+                                Uri.directory(screenshot_dir))
+                            .exists()) {
+                          initialDirectory = screenshot_dir;
+                        }
+                        String? selectedDirectory = await FilePicker.platform
+                            .getDirectoryPath(
+                                initialDirectory: initialDirectory);
+                        if (selectedDirectory != null) {
+                          await bind.mainSetLocalOption(
+                              key: kOptionScreenshotSaveDirectory,
+                              value: selectedDirectory);
+                          setState(() {});
+                        }
+                      },
+                fontSize: _kContentFontSize,
+              ).marginOnly(left: 10),
             ],
-          ).marginOnly(left: _kContentHMargin),
-        if (!(showRootDir && bind.isIncomingOnly()))
-          Row(
-            children: [
-              Text(
-                  '${translate((showRootDir && !bind.isOutgoingOnly()) ? "Outgoing" : "Directory")}:'),
-              Expanded(
-                child: GestureDetector(
-                    onTap: user_dir_exists
-                        ? () => launchUrl(Uri.file(user_dir))
-                        : null,
-                    child: Text(
-                      user_dir,
-                      softWrap: true,
-                      style: user_dir_exists
-                          ? const TextStyle(
-                              decoration: TextDecoration.underline)
-                          : null,
-                    )).marginOnly(left: 10),
-              ),
-              ElevatedButton(
-                      onPressed: isOptionFixed(kOptionVideoSaveDirectory)
-                          ? null
-                          : () async {
-                              String? initialDirectory;
-                              if (await Directory.fromUri(
-                                      Uri.directory(user_dir))
-                                  .exists()) {
-                                initialDirectory = user_dir;
-                              }
-                              String? selectedDirectory =
-                                  await FilePicker.platform.getDirectoryPath(
-                                      initialDirectory: initialDirectory);
-                              if (selectedDirectory != null) {
-                                await bind.mainSetLocalOption(
-                                    key: kOptionVideoSaveDirectory,
-                                    value: selectedDirectory);
-                                setState(() {});
-                              }
-                            },
-                      child: Text(translate('Change')))
-                  .marginOnly(left: 5),
-            ],
-          ).marginOnly(left: _kContentHMargin),
+          ),
+        ),
       ]);
     });
   }
@@ -757,11 +969,9 @@ class _GeneralState extends State<_General> {
       Map<String, String> langsMap = {for (var v in langsList) v[0]: v[1]};
       List<String> keys = langsMap.keys.toList();
       List<String> values = langsMap.values.toList();
-      keys.insert(0, defaultOptionLang);
-      values.insert(0, translate('Default'));
       String currentKey = bind.mainGetLocalOption(key: kCommConfKeyLang);
-      if (!keys.contains(currentKey)) {
-        currentKey = defaultOptionLang;
+      if (currentKey.isEmpty || currentKey == 'default' || !keys.contains(currentKey)) {
+        currentKey = 'ko';
       }
       final isOptFixed = isOptionFixed(kCommConfKeyLang);
       return ComboBox(
@@ -775,7 +985,7 @@ class _GeneralState extends State<_General> {
           if (!isWeb) bind.mainChangeLanguage(lang: key);
         },
         enabled: !isOptFixed,
-      ).marginOnly(left: _kContentHMargin);
+      );
     });
   }
 }
@@ -814,9 +1024,8 @@ class _SafetyState extends State<_Safety> with AutomaticKeepAliveClientMixin {
               block: locked,
               child: Column(children: [
                 permissions(context),
+                approveMode(context),
                 password(context),
-                _Card(title: '2FA', children: [tfa()]),
-                _Card(title: 'ID', children: [changeId()]),
                 more(context),
               ]),
             ),
@@ -850,10 +1059,12 @@ class _SafetyState extends State<_Safety> with AutomaticKeepAliveClientMixin {
         child: InkWell(
           child: Obx(() => Row(
                 children: [
-                  Checkbox(
-                          value: has2fa.value,
-                          onChanged: enabled ? onChanged : null)
-                      .marginOnly(right: 5),
+                  StyledCheckbox(
+                    value: has2fa.value,
+                    onChanged: enabled ? onChanged : null,
+                    enabled: enabled,
+                    accentColor: _accentColor,
+                  ).marginOnly(right: 5),
                   Expanded(
                       child: Text(
                     translate('enable-2fa-title'),
@@ -866,7 +1077,7 @@ class _SafetyState extends State<_Safety> with AutomaticKeepAliveClientMixin {
         onTap: () {
           onChanged(!has2fa.value);
         },
-      ).marginOnly(left: _kCheckBoxLeftMargin);
+      );
       if (!has2fa.value) {
         return tfa;
       }
@@ -893,10 +1104,12 @@ class _SafetyState extends State<_Safety> with AutomaticKeepAliveClientMixin {
           child: InkWell(
               child: Obx(() => Row(
                     children: [
-                      Checkbox(
-                              value: hasBot.value,
-                              onChanged: enabled ? onChangedBot : null)
-                          .marginOnly(right: 5),
+                      StyledCheckbox(
+                        value: hasBot.value,
+                        onChanged: enabled ? onChangedBot : null,
+                        enabled: enabled,
+                        accentColor: _accentColor,
+                      ).marginOnly(right: 5),
                       Expanded(
                           child: Text(
                         translate('Telegram bot'),
@@ -909,7 +1122,7 @@ class _SafetyState extends State<_Safety> with AutomaticKeepAliveClientMixin {
         onTap: () {
           onChangedBot(!hasBot.value);
         },
-      ).marginOnly(left: _kCheckBoxLeftMargin + 30);
+      ).marginOnly(left: 30);
 
       final trust = Row(
         children: [
@@ -925,18 +1138,22 @@ class _SafetyState extends State<_Safety> with AutomaticKeepAliveClientMixin {
             ),
           ),
           if (mainGetBoolOptionSync(kOptionEnableTrustedDevices))
-            ElevatedButton(
-                onPressed: locked
-                    ? null
-                    : () {
-                        manageTrustedDeviceDialog();
-                      },
-                child: Text(translate('Manage trusted devices')))
+            StyledCompactButton(
+              label: translate('Manage trusted devices'),
+              padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 20),
+              onPressed: locked ? null : () => manageTrustedDeviceDialog(),
+              height: 38,
+              fontSize: _kContentFontSize,
+            )
         ],
       ).marginOnly(left: 30);
 
       return Column(
-        children: [tfa, bot, trust],
+        children: [
+          tfa.marginOnly(bottom: 8),
+          bot.marginOnly(bottom: 8),
+          trust,
+        ],
       );
     }
 
@@ -999,55 +1216,79 @@ class _SafetyState extends State<_Safety> with AutomaticKeepAliveClientMixin {
             onChanged: (mode) async {
               await bind.mainSetOption(key: kOptionAccessMode, value: mode);
               setState(() {});
-            }).marginOnly(left: _kContentHMargin),
-        Column(
-          children: [
-            _OptionCheckBox(
-                context, 'Enable keyboard/mouse', kOptionEnableKeyboard,
-                enabled: enabled, fakeValue: fakeValue),
-            if (isWindows)
-              _OptionCheckBox(
-                  context, 'Enable remote printer', kOptionEnableRemotePrinter,
-                  enabled: enabled, fakeValue: fakeValue),
-            _OptionCheckBox(context, 'Enable clipboard', kOptionEnableClipboard,
-                enabled: enabled, fakeValue: fakeValue),
-            _OptionCheckBox(
-                context, 'Enable file transfer', kOptionEnableFileTransfer,
-                enabled: enabled, fakeValue: fakeValue),
-            _OptionCheckBox(context, 'Enable audio', kOptionEnableAudio,
-                enabled: enabled, fakeValue: fakeValue),
-            _OptionCheckBox(context, 'Enable camera', kOptionEnableCamera,
-                enabled: enabled, fakeValue: fakeValue),
-            _OptionCheckBox(context, 'Enable terminal', kOptionEnableTerminal,
-                enabled: enabled, fakeValue: fakeValue),
-            _OptionCheckBox(
-                context, 'Enable TCP tunneling', kOptionEnableTunnel,
-                enabled: enabled, fakeValue: fakeValue),
-            _OptionCheckBox(
-                context, 'Enable remote restart', kOptionEnableRemoteRestart,
-                enabled: enabled, fakeValue: fakeValue),
-            _OptionCheckBox(
-                context, 'Enable recording session', kOptionEnableRecordSession,
-                enabled: enabled, fakeValue: fakeValue),
-            if (isWindows)
-              _OptionCheckBox(context, 'Enable blocking user input',
-                  kOptionEnableBlockInput,
-                  enabled: enabled, fakeValue: fakeValue),
-            _OptionCheckBox(context, 'Enable remote configuration modification',
-                kOptionAllowRemoteConfigModification,
-                enabled: enabled, fakeValue: fakeValue),
-          ],
-        ),
+            }),
+        _OptionCheckBox(context, 'Enable keyboard/mouse', kOptionEnableKeyboard,
+            enabled: enabled, fakeValue: fakeValue),
+        if (isWindows)
+          _OptionCheckBox(
+              context, 'Enable remote printer', kOptionEnableRemotePrinter,
+              enabled: enabled, fakeValue: fakeValue),
+        _OptionCheckBox(context, 'Enable clipboard', kOptionEnableClipboard,
+            enabled: enabled, fakeValue: fakeValue),
+        _OptionCheckBox(
+            context, 'Enable file transfer', kOptionEnableFileTransfer,
+            enabled: enabled, fakeValue: fakeValue),
+        _OptionCheckBox(context, 'Enable audio', kOptionEnableAudio,
+            enabled: enabled, fakeValue: fakeValue),
+        _OptionCheckBox(context, 'Enable camera', kOptionEnableCamera,
+            enabled: enabled, fakeValue: fakeValue),
+        _OptionCheckBox(
+            context, 'Enable remote restart', kOptionEnableRemoteRestart,
+            enabled: enabled, fakeValue: fakeValue),
+        _OptionCheckBox(
+            context, 'Enable recording session', kOptionEnableRecordSession,
+            enabled: enabled, fakeValue: fakeValue),
+        _OptionCheckBox(context, 'Enable remote configuration modification',
+            kOptionAllowRemoteConfigModification,
+            enabled: enabled, fakeValue: fakeValue),
       ]);
     }
 
     return tmpWrapper();
   }
 
+  /// 액세스 수락 카드 (세션 수락 방법 선택)
+  Widget approveMode(BuildContext context) {
+    return ChangeNotifierProvider.value(
+        value: gFFI.serverModel,
+        child: Consumer<ServerModel>(builder: ((context, model, child) {
+          final modeKeys = <String>[
+            'password',
+            'click',
+            defaultOptionApproveMode
+          ];
+          final modeValues = [
+            translate('Accept sessions via password'),
+            translate('Accept sessions via click'),
+            translate('Accept sessions via both'),
+          ];
+          var modeInitialKey = model.approveMode;
+          if (!modeKeys.contains(modeInitialKey)) {
+            modeInitialKey = defaultOptionApproveMode;
+          }
+          final isApproveModeFixed = isOptionFixed(kOptionApproveMode);
+          return _Card(title: 'Access Accept', children: [
+            ComboBox(
+              enabled: !locked && !isApproveModeFixed,
+              keys: modeKeys,
+              values: modeValues,
+              initialKey: modeInitialKey,
+              onChanged: (key) => model.setApproveMode(key),
+            ),
+          ]);
+        })));
+  }
+
   Widget password(BuildContext context) {
     return ChangeNotifierProvider.value(
         value: gFFI.serverModel,
         child: Consumer<ServerModel>(builder: ((context, model, child) {
+          // 비밀번호 모드가 click이면 비밀번호 카드 숨김
+          final usePassword = model.approveMode != 'click';
+          if (!usePassword) {
+            return const SizedBox.shrink();
+          }
+
           List<String> passwordKeys = [
             kUseTemporaryPassword,
             kUsePermanentPassword,
@@ -1104,16 +1345,19 @@ class _SafetyState extends State<_Safety> with AutomaticKeepAliveClientMixin {
               .map((value) => GestureDetector(
                     child: Row(
                       children: [
-                        Radio(
-                            value: value,
-                            groupValue: model.temporaryPasswordLength,
-                            onChanged: onChanged),
+                        StyledRadio<String>(
+                          value: value,
+                          groupValue: model.temporaryPasswordLength,
+                          onChanged: onChanged,
+                          enabled: onChanged != null,
+                          accentColor: _accentColor,
+                        ),
                         Text(
                           value,
                           style: TextStyle(
                               color: disabledTextColor(
                                   context, onChanged != null)),
-                        ),
+                        ).marginOnly(left: 8),
                       ],
                     ).paddingOnly(right: 10),
                     onTap: () => onChanged?.call(value),
@@ -1123,75 +1367,69 @@ class _SafetyState extends State<_Safety> with AutomaticKeepAliveClientMixin {
           final isOptFixedNumOTP =
               isOptionFixed(kOptionAllowNumericOneTimePassword);
           final isNumOPTChangable = !isOptFixedNumOTP && tmpEnabled && !locked;
-          final numericOneTimePassword = GestureDetector(
-            child: InkWell(
-                child: Row(
+
+          // 일회용 비밀번호 옵션 카드 (배경색 #F7F7F7)
+          final oneTimePasswordOptions = Container(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+            decoration: BoxDecoration(
+              color: const Color(0xFFF7F7F7),
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Checkbox(
-                        value: model.allowNumericOneTimePassword,
-                        onChanged: isNumOPTChangable
-                            ? (bool? v) {
-                                model.switchAllowNumericOneTimePassword();
-                              }
-                            : null)
-                    .marginOnly(right: 5),
-                Expanded(
-                    child: Text(
-                  translate('Numeric one-time password'),
-                  style: TextStyle(
-                      color: disabledTextColor(context, isNumOPTChangable)),
-                ))
+                // 상단: 라벨 + 체크박스
+                Row(
+                  children: [
+                    Text(
+                      translate('One-time password length'),
+                      style: TextStyle(
+                          color: disabledTextColor(
+                              context, tmpEnabled && !locked)),
+                    ),
+                    const Spacer(),
+                    GestureDetector(
+                      onTap: isNumOPTChangable
+                          ? () => model.switchAllowNumericOneTimePassword()
+                          : null,
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          StyledCheckbox(
+                            value: model.allowNumericOneTimePassword,
+                            onChanged: isNumOPTChangable
+                                ? (bool? v) {
+                                    model.switchAllowNumericOneTimePassword();
+                                  }
+                                : null,
+                            enabled: isNumOPTChangable,
+                            accentColor: _accentColor,
+                          ).marginOnly(right: 5),
+                          Text(
+                            translate('Numeric one-time password'),
+                            style: TextStyle(
+                                color: disabledTextColor(
+                                    context, isNumOPTChangable)),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+                // 하단: 라디오 버튼
+                const SizedBox(height: 8),
+                Row(children: lengthRadios),
               ],
-            )),
-            onTap: isNumOPTChangable
-                ? () => model.switchAllowNumericOneTimePassword()
-                : null,
-          ).marginOnly(left: _kContentHSubMargin - 5);
+            ),
+          );
 
-          final modeKeys = <String>[
-            'password',
-            'click',
-            defaultOptionApproveMode
-          ];
-          final modeValues = [
-            translate('Accept sessions via password'),
-            translate('Accept sessions via click'),
-            translate('Accept sessions via both'),
-          ];
-          var modeInitialKey = model.approveMode;
-          if (!modeKeys.contains(modeInitialKey)) {
-            modeInitialKey = defaultOptionApproveMode;
-          }
-          final usePassword = model.approveMode != 'click';
-
-          final isApproveModeFixed = isOptionFixed(kOptionApproveMode);
           return _Card(title: 'Password', children: [
-            ComboBox(
-              enabled: !locked && !isApproveModeFixed,
-              keys: modeKeys,
-              values: modeValues,
-              initialKey: modeInitialKey,
-              onChanged: (key) => model.setApproveMode(key),
-            ).marginOnly(left: _kContentHMargin),
-            if (usePassword) radios[0],
-            if (usePassword)
-              _SubLabeledWidget(
-                  context,
-                  'One-time password length',
-                  Row(
-                    children: [
-                      ...lengthRadios,
-                    ],
-                  ),
-                  enabled: tmpEnabled && !locked),
-            if (usePassword) numericOneTimePassword,
-            if (usePassword) radios[1],
-            if (usePassword)
-              _SubButton('Set permanent password', setPasswordDialog,
-                  permEnabled && !locked),
-            // if (usePassword)
-            //   hide_cm(!locked).marginOnly(left: _kContentHSubMargin - 6),
-            if (usePassword) radios[2],
+            radios[0],
+            oneTimePasswordOptions,
+            radios[1],
+            _SubButton('Set permanent password', setPasswordDialog,
+                permEnabled && !locked),
+            radios[2],
           ]);
         })));
   }
@@ -1225,17 +1463,19 @@ class _SafetyState extends State<_Safety> with AutomaticKeepAliveClientMixin {
       child: GestureDetector(
           child: Row(
             children: [
-              Checkbox(
-                      value: value,
-                      onChanged: enabled ? (_) => onChanged(!value) : null)
-                  .marginOnly(right: 5),
+              StyledCheckbox(
+                value: value,
+                onChanged: enabled ? (_) => onChanged(!value) : null,
+                enabled: enabled,
+                accentColor: _accentColor,
+              ).marginOnly(right: 5),
               Expanded(
                 child: Text(translate('Enable RDP session sharing'),
                     style:
                         TextStyle(color: disabledTextColor(context, enabled))),
               )
             ],
-          ).marginOnly(left: _kCheckBoxLeftMargin),
+          ),
           onTap: enabled ? () => onChanged(!value) : null),
     );
   }
@@ -1248,60 +1488,69 @@ class _SafetyState extends State<_Safety> with AutomaticKeepAliveClientMixin {
       _OptionCheckBox(context, 'Enable direct IP access', kOptionDirectServer,
           update: update, enabled: !locked),
       () {
-        // Simple temp wrapper for PR check
-        tmpWrapper() {
-          bool enabled = option2bool(kOptionDirectServer,
-              bind.mainGetOptionSync(key: kOptionDirectServer));
-          if (!enabled) applyEnabled.value = false;
-          controller.text =
-              bind.mainGetOptionSync(key: kOptionDirectAccessPort);
-          final isOptFixed = isOptionFixed(kOptionDirectAccessPort);
-          return Offstage(
-            offstage: !enabled,
-            child: _SubLabeledWidget(
-              context,
-              'Port',
-              Row(children: [
-                SizedBox(
-                  width: 95,
-                  child: TextField(
-                    controller: controller,
-                    enabled: enabled && !locked && !isOptFixed,
-                    onChanged: (_) => applyEnabled.value = true,
-                    inputFormatters: [
-                      FilteringTextInputFormatter.allow(RegExp(
-                          r'^([0-9]|[1-9]\d|[1-9]\d{2}|[1-9]\d{3}|[1-5]\d{4}|6[0-4]\d{3}|65[0-4]\d{2}|655[0-2]\d|6553[0-5])$')),
-                    ],
-                    decoration: const InputDecoration(
-                      hintText: '21118',
-                      contentPadding:
-                          EdgeInsets.symmetric(vertical: 12, horizontal: 12),
-                    ),
-                  ).workaroundFreezeLinuxMint().marginOnly(right: 15),
+        bool enabled = option2bool(kOptionDirectServer,
+            bind.mainGetOptionSync(key: kOptionDirectServer));
+        if (!enabled) return const SizedBox.shrink();
+        applyEnabled.value = false;
+        controller.text =
+            bind.mainGetOptionSync(key: kOptionDirectAccessPort);
+        final isOptFixed = isOptionFixed(kOptionDirectAccessPort);
+        final isEnabled = enabled && !locked && !isOptFixed;
+        return Container(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+          decoration: BoxDecoration(
+            color: const Color(0xFFF7F7F7),
+            borderRadius: BorderRadius.circular(8),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                translate('Port'),
+                style: TextStyle(
+                  color: disabledTextColor(context, isEnabled),
                 ),
-                Obx(() => ElevatedButton(
-                      onPressed: applyEnabled.value &&
-                              enabled &&
-                              !locked &&
-                              !isOptFixed
-                          ? () async {
-                              applyEnabled.value = false;
-                              await bind.mainSetOption(
-                                  key: kOptionDirectAccessPort,
-                                  value: controller.text);
-                            }
-                          : null,
-                      child: Text(
-                        translate('Apply'),
-                      ),
-                    ))
-              ]),
-              enabled: enabled && !locked && !isOptFixed,
-            ),
-          );
-        }
-
-        return tmpWrapper();
+              ),
+              const SizedBox(height: 8),
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.center,
+                children: [
+                  SizedBox(
+                    width: 234,
+                    height: 40,
+                    child: StyledTextField(
+                      controller: controller,
+                      enabled: isEnabled,
+                      onChanged: (_) => applyEnabled.value = true,
+                      inputFormatters: [
+                        FilteringTextInputFormatter.allow(RegExp(
+                            r'^([0-9]|[1-9]\d|[1-9]\d{2}|[1-9]\d{3}|[1-5]\d{4}|6[0-4]\d{3}|65[0-4]\d{2}|655[0-2]\d|6553[0-5])$')),
+                      ],
+                      hintText: '21118',
+                      contentPadding: const EdgeInsets.symmetric(
+                          vertical: 0, horizontal: 12),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Obx(() => StyledCompactButton(
+                        label: translate('Apply'),
+                        fillWidth: false,
+                        height: 40,
+                        padding: const EdgeInsets.symmetric(horizontal: 20),
+                        onPressed: applyEnabled.value && isEnabled
+                            ? () async {
+                                applyEnabled.value = false;
+                                await bind.mainSetOption(
+                                    key: kOptionDirectAccessPort,
+                                    value: controller.text);
+                              }
+                            : null,
+                      )),
+                ],
+              ),
+            ],
+          ),
+        );
       }(),
     ];
   }
@@ -1320,39 +1569,45 @@ class _SafetyState extends State<_Safety> with AutomaticKeepAliveClientMixin {
       }
 
       final isOptFixed = isOptionFixed(kOptionWhitelist);
-      return GestureDetector(
-        child: Tooltip(
-          message: translate('whitelist_tip'),
-          child: Obx(() => Row(
-                children: [
-                  Checkbox(
-                          value: hasWhitelist.value,
-                          onChanged: enabled && !isOptFixed ? onChanged : null)
-                      .marginOnly(right: 5),
-                  Offstage(
-                    offstage: !hasWhitelist.value,
-                    child: MouseRegion(
-                      child: const Icon(Icons.warning_amber_rounded,
-                              color: Color.fromARGB(255, 255, 204, 0))
-                          .marginOnly(right: 5),
-                      cursor: SystemMouseCursors.click,
+      final isEnabled = enabled && !isOptFixed;
+      return MouseRegion(
+        cursor: isEnabled ? SystemMouseCursors.click : SystemMouseCursors.basic,
+        child: GestureDetector(
+          child: Tooltip(
+            message: translate('whitelist_tip'),
+            child: Obx(() => Row(
+                  children: [
+                    StyledCheckbox(
+                      value: hasWhitelist.value,
+                      onChanged: isEnabled ? onChanged : null,
+                      enabled: isEnabled,
+                      accentColor: _accentColor,
+                    ).marginOnly(right: 5),
+                    Offstage(
+                      offstage: !hasWhitelist.value,
+                      child: MouseRegion(
+                        child: const Icon(Icons.warning_amber_rounded,
+                                color: Color.fromARGB(255, 255, 204, 0))
+                            .marginOnly(right: 5),
+                        cursor: SystemMouseCursors.click,
+                      ),
                     ),
-                  ),
-                  Expanded(
-                      child: Text(
-                    translate('Use IP Whitelisting'),
-                    style:
-                        TextStyle(color: disabledTextColor(context, enabled)),
-                  ))
-                ],
-              )),
+                    Expanded(
+                        child: Text(
+                      translate('Use IP Whitelisting'),
+                      style:
+                          TextStyle(color: disabledTextColor(context, enabled)),
+                    ))
+                  ],
+                )),
+          ),
+          onTap: isEnabled
+              ? () {
+                  onChanged(!hasWhitelist.value);
+                }
+              : null,
         ),
-        onTap: enabled
-            ? () {
-                onChanged(!hasWhitelist.value);
-              }
-            : null,
-      ).marginOnly(left: _kCheckBoxLeftMargin);
+      );
     }
 
     return tmpWrapper();
@@ -1371,28 +1626,33 @@ class _SafetyState extends State<_Safety> with AutomaticKeepAliveClientMixin {
             }
           }
 
+          final isEnabled = enabled && enableHideCm;
           return Tooltip(
               message: enableHideCm ? "" : translate('hide_cm_tip'),
-              child: GestureDetector(
-                onTap:
-                    enableHideCm ? () => onHideCmChanged(!model.hideCm) : null,
-                child: Row(
-                  children: [
-                    Checkbox(
-                            value: model.hideCm,
-                            onChanged: enabled && enableHideCm
-                                ? onHideCmChanged
-                                : null)
-                        .marginOnly(right: 5),
-                    Expanded(
-                      child: Text(
-                        translate('Hide connection management window'),
-                        style: TextStyle(
-                            color: disabledTextColor(
-                                context, enabled && enableHideCm)),
+              child: MouseRegion(
+                cursor: isEnabled
+                    ? SystemMouseCursors.click
+                    : SystemMouseCursors.basic,
+                child: GestureDetector(
+                  onTap:
+                      isEnabled ? () => onHideCmChanged(!model.hideCm) : null,
+                  child: Row(
+                    children: [
+                      StyledCheckbox(
+                        value: model.hideCm,
+                        onChanged: isEnabled ? onHideCmChanged : null,
+                        enabled: isEnabled,
+                        accentColor: _accentColor,
+                      ).marginOnly(right: 5),
+                      Expanded(
+                        child: Text(
+                          translate('Hide connection management window'),
+                          style: TextStyle(
+                              color: disabledTextColor(context, isEnabled)),
+                        ),
                       ),
-                    ),
-                  ],
+                    ],
+                  ),
                 ),
               ));
         }));
@@ -1409,36 +1669,54 @@ class _SafetyState extends State<_Safety> with AutomaticKeepAliveClientMixin {
       () {
         bool enabled = option2bool(kOptionAllowAutoDisconnect,
             bind.mainGetOptionSync(key: kOptionAllowAutoDisconnect));
-        if (!enabled) applyEnabled.value = false;
+        if (!enabled) return const SizedBox.shrink();
+        applyEnabled.value = false;
         controller.text =
             bind.mainGetOptionSync(key: kOptionAutoDisconnectTimeout);
         final isOptFixed = isOptionFixed(kOptionAutoDisconnectTimeout);
-        return Offstage(
-          offstage: !enabled,
-          child: _SubLabeledWidget(
-            context,
-            'Timeout in minutes',
-            Row(children: [
-              SizedBox(
-                width: 95,
-                child: TextField(
-                  controller: controller,
-                  enabled: enabled && !locked && !isOptFixed,
-                  onChanged: (_) => applyEnabled.value = true,
-                  inputFormatters: [
-                    FilteringTextInputFormatter.allow(RegExp(
-                        r'^([0-9]|[1-9]\d|[1-9]\d{2}|[1-9]\d{3}|[1-5]\d{4}|6[0-4]\d{3}|65[0-4]\d{2}|655[0-2]\d|6553[0-5])$')),
-                  ],
-                  decoration: const InputDecoration(
-                    hintText: '10',
-                    contentPadding:
-                        EdgeInsets.symmetric(vertical: 12, horizontal: 12),
-                  ),
-                ).workaroundFreezeLinuxMint().marginOnly(right: 15),
+        final isEnabled = enabled && !locked && !isOptFixed;
+        return Container(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+          decoration: BoxDecoration(
+            color: const Color(0xFFF7F7F7),
+            borderRadius: BorderRadius.circular(8),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                translate('Timeout in minutes'),
+                style: TextStyle(
+                  color: disabledTextColor(context, isEnabled),
+                ),
               ),
-              Obx(() => ElevatedButton(
-                    onPressed:
-                        applyEnabled.value && enabled && !locked && !isOptFixed
+              const SizedBox(height: 8),
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.center,
+                children: [
+                  SizedBox(
+                    width: 234,
+                    height: 40,
+                    child: StyledTextField(
+                      controller: controller,
+                      enabled: isEnabled,
+                      onChanged: (_) => applyEnabled.value = true,
+                      inputFormatters: [
+                        FilteringTextInputFormatter.allow(RegExp(
+                            r'^([0-9]|[1-9]\d|[1-9]\d{2}|[1-9]\d{3}|[1-5]\d{4}|6[0-4]\d{3}|65[0-4]\d{2}|655[0-2]\d|6553[0-5])$')),
+                      ],
+                      hintText: '10',
+                      contentPadding: const EdgeInsets.symmetric(
+                          vertical: 0, horizontal: 12),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Obx(() => StyledCompactButton(
+                        label: translate('Apply'),
+                        fillWidth: false,
+                        height: 40,
+                        padding: const EdgeInsets.symmetric(horizontal: 20),
+                        onPressed: applyEnabled.value && isEnabled
                             ? () async {
                                 applyEnabled.value = false;
                                 await bind.mainSetOption(
@@ -1446,12 +1724,10 @@ class _SafetyState extends State<_Safety> with AutomaticKeepAliveClientMixin {
                                     value: controller.text);
                               }
                             : null,
-                    child: Text(
-                      translate('Apply'),
-                    ),
-                  ))
-            ]),
-            enabled: enabled && !locked && !isOptFixed,
+                      )),
+                ],
+              ),
+            ],
           ),
         );
       }(),
@@ -1470,26 +1746,32 @@ class _SafetyState extends State<_Safety> with AutomaticKeepAliveClientMixin {
     }
 
     final isOptFixed = isOptionFixed(kOptionWhitelist);
-    return GestureDetector(
-      child: Obx(() => Row(
-            children: [
-              Checkbox(
-                      value: unlockPin.isNotEmpty,
-                      onChanged: enabled && !isOptFixed ? onChanged : null)
-                  .marginOnly(right: 5),
-              Expanded(
-                  child: Text(
-                translate('Unlock with PIN'),
-                style: TextStyle(color: disabledTextColor(context, enabled)),
-              ))
-            ],
-          )),
-      onTap: enabled
-          ? () {
-              onChanged(!unlockPin.isNotEmpty);
-            }
-          : null,
-    ).marginOnly(left: _kCheckBoxLeftMargin);
+    final isEnabled = enabled && !isOptFixed;
+    return MouseRegion(
+      cursor: isEnabled ? SystemMouseCursors.click : SystemMouseCursors.basic,
+      child: GestureDetector(
+        child: Obx(() => Row(
+              children: [
+                StyledCheckbox(
+                  value: unlockPin.isNotEmpty,
+                  onChanged: isEnabled ? onChanged : null,
+                  enabled: isEnabled,
+                  accentColor: _accentColor,
+                ).marginOnly(right: 5),
+                Expanded(
+                    child: Text(
+                  translate('Unlock with PIN'),
+                  style: TextStyle(color: disabledTextColor(context, enabled)),
+                ))
+              ],
+            )),
+        onTap: isEnabled
+            ? () {
+                onChanged(!unlockPin.isNotEmpty);
+              }
+            : null,
+      ),
+    );
   }
 }
 
@@ -1746,12 +2028,6 @@ class _DisplayState extends State<_Display> {
 
     final groupValue = bind.mainGetUserDefaultOption(key: kOptionScrollStyle);
 
-    onEdgeScrollEdgeThicknessChanged(double value) async {
-      await bind.mainSetUserDefaultOption(
-          key: kOptionEdgeScrollEdgeThickness, value: value.round().toString());
-      setState(() {});
-    }
-
     return _Card(title: 'Default Scroll Style', children: [
       _Radio(context,
           value: kRemoteScrollStyleAuto,
@@ -1763,23 +2039,6 @@ class _DisplayState extends State<_Display> {
           groupValue: groupValue,
           label: 'Scrollbar',
           onChanged: isOptFixed ? null : onChanged),
-      if (!isWeb) ...[
-        _Radio(context,
-            value: kRemoteScrollStyleEdge,
-            groupValue: groupValue,
-            label: 'ScrollEdge',
-            onChanged: isOptFixed ? null : onChanged),
-        Offstage(
-            offstage: groupValue != kRemoteScrollStyleEdge,
-            child: EdgeThicknessControl(
-              value: double.tryParse(bind.mainGetUserDefaultOption(
-                      key: kOptionEdgeScrollEdgeThickness)) ??
-                  100.0,
-              onChanged: isOptionFixed(kOptionEdgeScrollEdgeThickness)
-                  ? null
-                  : onEdgeScrollEdgeThicknessChanged,
-            )),
-      ],
     ]);
   }
 
@@ -1808,15 +2067,6 @@ class _DisplayState extends State<_Display> {
           groupValue: groupValue,
           label: 'Optimize reaction time',
           onChanged: isOptFixed ? null : onChanged),
-      _Radio(context,
-          value: kRemoteImageQualityCustom,
-          groupValue: groupValue,
-          label: 'Custom',
-          onChanged: isOptFixed ? null : onChanged),
-      Offstage(
-        offstage: groupValue != kRemoteImageQualityCustom,
-        child: customImageQualitySetting(),
-      )
     ]);
   }
 
@@ -1945,19 +2195,24 @@ class _DisplayState extends State<_Display> {
       setState(() {});
     }
 
-    return GestureDetector(
-        child: Row(
-          children: [
-            Checkbox(
-                    value: value,
-                    onChanged: isOptFixed ? null : (_) => onChanged(!value))
-                .marginOnly(right: 5),
-            Expanded(
-              child: Text(translate(label)),
-            )
-          ],
-        ).marginOnly(left: _kCheckBoxLeftMargin),
-        onTap: isOptFixed ? null : () => onChanged(!value));
+    return MouseRegion(
+      cursor: isOptFixed ? SystemMouseCursors.basic : SystemMouseCursors.click,
+      child: GestureDetector(
+          child: Row(
+            children: [
+              StyledCheckbox(
+                value: value,
+                onChanged: isOptFixed ? null : (_) => onChanged(!value),
+                enabled: !isOptFixed,
+                accentColor: _accentColor,
+              ).marginOnly(right: 5),
+              Expanded(
+                child: Text(translate(label)),
+              )
+            ],
+          ),
+          onTap: isOptFixed ? null : () => onChanged(!value)),
+    );
   }
 
   Widget other(BuildContext context) {
@@ -1987,13 +2242,14 @@ class _AccountState extends State<_Account> {
   }
 
   Widget accountAction() {
-    return Obx(() => _Button(
-        gFFI.userModel.userName.value.isEmpty ? 'Login' : 'Logout',
-        () => {
-              gFFI.userModel.userName.value.isEmpty
-                  ? loginDialog()
-                  : logOutConfirmDialog()
-            }));
+    return Obx(() {
+      final isLoggedIn = gFFI.userModel.userName.value.isNotEmpty ||
+          gFFI.userModel.userEmail.value.isNotEmpty;
+      return _Button(
+        isLoggedIn ? 'Logout' : 'Login',
+        () => isLoggedIn ? logOutConfirmDialog() : loginDialog(),
+      );
+    });
   }
 
   Widget useInfo() {
@@ -2005,12 +2261,30 @@ class _AccountState extends State<_Account> {
       );
     }
 
+    String getPlanTypeName(int type) {
+      switch (type) {
+        case 1:
+          return 'Free';
+        case 2:
+          return 'Personal';
+        case 3:
+          return 'Enterprise';
+        default:
+          return 'Unknown';
+      }
+    }
+
     return Obx(() => Offstage(
-          offstage: gFFI.userModel.userName.value.isEmpty,
+          offstage: gFFI.userModel.userName.value.isEmpty &&
+              gFFI.userModel.userEmail.value.isEmpty,
           child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              text('Username', gFFI.userModel.userName.value),
-              // text('Group', gFFI.groupModel.groupName.value),
+              if (gFFI.userModel.userName.value.isNotEmpty)
+                text('Username', gFFI.userModel.userName.value),
+              if (gFFI.userModel.userEmail.value.isNotEmpty)
+                text('Email', gFFI.userModel.userEmail.value),
+              text('Plan', getPlanTypeName(gFFI.userModel.userType.value)),
             ],
           ),
         )).marginOnly(left: 18, top: 16);
@@ -2051,19 +2325,23 @@ class _CheckboxState extends State<_Checkbox> {
       });
     }
 
-    return GestureDetector(
-      child: Row(
-        children: [
-          Checkbox(
-            value: value,
-            onChanged: (_) => onChanged(!value),
-          ).marginOnly(right: 5),
-          Expanded(
-            child: Text(translate(widget.label)),
-          )
-        ],
-      ).marginOnly(left: _kCheckBoxLeftMargin),
-      onTap: () => onChanged(!value),
+    return MouseRegion(
+      cursor: SystemMouseCursors.click,
+      child: GestureDetector(
+        child: Row(
+          children: [
+            StyledCheckbox(
+              value: value,
+              onChanged: (_) => onChanged(!value),
+              accentColor: _accentColor,
+            ).marginOnly(right: 5),
+            Expanded(
+              child: Text(translate(widget.label)),
+            )
+          ],
+        ),
+        onTap: () => onChanged(!value),
+      ),
     );
   }
 }
@@ -2269,90 +2547,150 @@ class _AboutState extends State<_About> {
   @override
   Widget build(BuildContext context) {
     return futureBuilder(future: () async {
-      final license = await bind.mainGetLicense();
       final version = await bind.mainGetVersion();
       final buildDate = await bind.mainGetBuildDate();
-      final fingerprint = await bind.mainGetFingerprint();
       return {
-        'license': license,
         'version': version,
         'buildDate': buildDate,
-        'fingerprint': fingerprint
       };
     }(), hasData: (data) {
-      final license = data['license'].toString();
       final version = data['version'].toString();
       final buildDate = data['buildDate'].toString();
-      final fingerprint = data['fingerprint'].toString();
-      const linkStyle = TextStyle(decoration: TextDecoration.underline);
       final scrollController = ScrollController();
       return SingleChildScrollView(
         controller: scrollController,
-        child: _Card(title: translate('About RustDesk'), children: [
+        child: _Card(title: translate('About OneDesk'), children: [
           Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const SizedBox(
-                height: 8.0,
-              ),
+              const SizedBox(height: 8.0),
+              // 버전 정보
               SelectionArea(
-                  child: Text('${translate('Version')}: $version')
-                      .marginSymmetric(vertical: 4.0)),
+                child: Text(
+                  '${translate('Version')}: $version',
+                  style: const TextStyle(
+                      fontSize: _kContentFontSize, color: Colors.black87),
+                ),
+              ).marginOnly(bottom: 12),
+              // 빌드 날짜
               SelectionArea(
-                  child: Text('${translate('Build Date')}: $buildDate')
-                      .marginSymmetric(vertical: 4.0)),
-              if (!isWeb)
-                SelectionArea(
-                    child: Text('${translate('Fingerprint')}: $fingerprint')
-                        .marginSymmetric(vertical: 4.0)),
-              InkWell(
-                  onTap: () {
-                    launchUrlString('https://rustdesk.com/privacy.html');
-                  },
-                  child: Text(
-                    translate('Privacy Statement'),
-                    style: linkStyle,
-                  ).marginSymmetric(vertical: 4.0)),
-              InkWell(
-                  onTap: () {
-                    launchUrlString('https://rustdesk.com');
-                  },
-                  child: Text(
-                    translate('Website'),
-                    style: linkStyle,
-                  ).marginSymmetric(vertical: 4.0)),
+                child: Text(
+                  '${translate('Build Date')}: $buildDate',
+                  style: const TextStyle(
+                      fontSize: _kContentFontSize, color: Colors.black87),
+                ),
+              ).marginOnly(bottom: 20),
+              // 링크 버튼들
+              Row(
+                children: [
+                  // Onedesk 홈페이지 버튼
+                  _AboutLinkButton(
+                    label: translate('Website'),
+                    onPressed: () => launchUrlString('https://onedesk.co.kr'),
+                  ),
+                  const SizedBox(width: 12),
+                  // 이용약관 버튼
+                  _AboutLinkButton(
+                    label: translate('Privacy Statement'),
+                    onPressed: () =>
+                        launchUrlString('https://onedesk.co.kr/terms'),
+                  ),
+                ],
+              ).marginOnly(bottom: 20),
+              // Copyright 박스 (녹화경로와 동일한 스타일)
               Container(
-                decoration: const BoxDecoration(color: Color(0xFF2c8cff)),
-                padding:
-                    const EdgeInsets.symmetric(vertical: 24, horizontal: 8),
+                width: double.infinity,
+                decoration: BoxDecoration(
+                  color: _accentColorLighter,
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                padding: const EdgeInsets.all(20),
                 child: SelectionArea(
-                    child: Row(
-                  children: [
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            'Copyright © ${DateTime.now().toString().substring(0, 4)} Purslane Ltd.\n$license',
-                            style: const TextStyle(color: Colors.white),
-                          ),
-                          Text(
-                            translate('Slogan_tip'),
-                            style: TextStyle(
-                                fontWeight: FontWeight.w800,
-                                color: Colors.white),
-                          )
-                        ],
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Copyright © ${DateTime.now().year} MarketingMonster Ltd.',
+                        style: const TextStyle(
+                          fontSize: _kContentFontSize,
+                          color: _primaryColor,
+                          fontWeight: FontWeight.w500,
+                        ),
                       ),
-                    ),
-                  ],
-                )),
-              ).marginSymmetric(vertical: 4.0)
+                      const SizedBox(height: 4),
+                      Text(
+                        translate('Slogan_tip'),
+                        style: const TextStyle(
+                          fontSize: _kContentFontSize,
+                          color: _primaryColor,
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
             ],
-          ).marginOnly(left: _kContentHMargin)
+          )
         ]),
       );
     });
+  }
+}
+
+/// About 페이지 링크 버튼
+class _AboutLinkButton extends StatefulWidget {
+  final String label;
+  final VoidCallback onPressed;
+
+  const _AboutLinkButton({
+    required this.label,
+    required this.onPressed,
+  });
+
+  @override
+  State<_AboutLinkButton> createState() => _AboutLinkButtonState();
+}
+
+class _AboutLinkButtonState extends State<_AboutLinkButton> {
+  bool _isHovered = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final borderColor = _isHovered ? _primaryColor : Colors.grey[300]!;
+    final contentColor = _isHovered ? _primaryColor : Colors.grey[700]!;
+
+    return MouseRegion(
+      cursor: SystemMouseCursors.click,
+      onEnter: (_) => setState(() => _isHovered = true),
+      onExit: (_) => setState(() => _isHovered = false),
+      child: GestureDetector(
+        onTap: widget.onPressed,
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(color: borderColor, width: 1),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(Icons.arrow_outward, size: 16, color: contentColor),
+              const SizedBox(width: 8),
+              Text(
+                widget.label,
+                style: TextStyle(
+                  fontSize: 14,
+                  color: contentColor,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
   }
 }
 
@@ -2360,43 +2698,58 @@ class _AboutState extends State<_About> {
 
 //#region components
 
+/// 설정 카드 위젯
+/// ContentCard를 래핑하여 설정 페이지 스타일 적용
 // ignore: non_constant_identifier_names
 Widget _Card(
     {required String title,
     required List<Widget> children,
-    List<Widget>? title_suffix}) {
-  return Row(
-    children: [
-      Flexible(
-        child: SizedBox(
-          width: _kCardFixedWidth,
-          child: Card(
-            child: Column(
-              children: [
-                Row(
-                  children: [
-                    Expanded(
-                        child: Text(
-                      translate(title),
-                      textAlign: TextAlign.start,
-                      style: const TextStyle(
-                        fontSize: _kTitleFontSize,
-                      ),
-                    )),
-                    ...?title_suffix
-                  ],
-                ).marginOnly(left: _kContentHMargin, top: 10, bottom: 10),
-                ...children
-                    .map((e) => e.marginOnly(top: 4, right: _kContentHMargin)),
-              ],
-            ).marginOnly(bottom: 10),
-          ).marginOnly(left: _kCardLeftMargin, top: 15),
-        ),
-      ),
-    ],
+    List<Widget>? title_suffix,
+    Color? backgroundColor}) {
+  return ContentCard(
+    title: translate(title),
+    titleSuffix: title_suffix,
+    backgroundColor: backgroundColor ?? _cardBackgroundColor,
+    margin: const EdgeInsets.only(
+        left: _kCardLeftMargin, right: _kCardLeftMargin, top: 16),
+    contentPadding: EdgeInsets.zero,
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        ...children.map((e) => _CardChildWrapper(child: e)),
+        const SizedBox(height: 20),
+      ],
+    ),
   );
 }
 
+/// _Card 자식 위젯 래퍼 - 빈 위젯에는 Padding을 적용하지 않음
+class _CardChildWrapper extends StatelessWidget {
+  final Widget child;
+  const _CardChildWrapper({required this.child});
+
+  @override
+  Widget build(BuildContext context) {
+    // SizedBox.shrink()인 경우 패딩 없이 그대로 반환 (공간 차지 안함)
+    if (child is SizedBox) {
+      final sizedBox = child as SizedBox;
+      if (sizedBox.width == 0 && sizedBox.height == 0) {
+        return child;
+      }
+    }
+    // Offstage인 경우 패딩 없이 그대로 반환
+    if (child is Offstage) {
+      return child;
+    }
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(20, 12, 20, 0),
+      child: child,
+    );
+  }
+}
+
+/// 설정 옵션 체크박스 위젯
+/// 보라색 테마 적용
 // ignore: non_constant_identifier_names
 Widget _OptionCheckBox(
   BuildContext context,
@@ -2416,10 +2769,16 @@ Widget _OptionCheckBox(
       : (isServer
           ? mainGetBoolOptionSync(key)
           : mainGetLocalBoolOptionSync(key));
-  bool value = getOpt();
+
   final isOptFixed = isOptionFixed(key);
-  if (reverse) value = !value;
-  var ref = value.obs;
+
+  // 전역 ValueNotifier 사용 (외부에서 변경 시 동기화됨)
+  // optGetter가 제공된 경우 커스텀 로직이므로 동기화 대상에서 제외
+  final notifierKey = reverse ? '${key}_reversed' : key;
+  final notifier = optGetter != null
+      ? ValueNotifier<bool>(reverse ? !getOpt() : getOpt())
+      : _getOrCreateOptionNotifier(notifierKey, key, isServer, reverse);
+
   onChanged(option) async {
     if (option != null) {
       if (reverse) option = !option;
@@ -2427,48 +2786,60 @@ Widget _OptionCheckBox(
           optSetter ?? (isServer ? mainSetBoolOption : mainSetLocalBoolOption);
       await setter(key, option);
       final readOption = getOpt();
-      if (reverse) {
-        ref.value = !readOption;
-      } else {
-        ref.value = readOption;
-      }
+      notifier.value = reverse ? !readOption : readOption;
       update?.call(readOption);
     }
   }
 
   if (fakeValue != null) {
-    ref.value = fakeValue;
+    notifier.value = fakeValue;
     enabled = false;
   }
 
-  return GestureDetector(
-    child: Obx(
-      () => Row(
-        children: [
-          Checkbox(
-                  value: ref.value,
-                  onChanged: enabled && !isOptFixed ? onChanged : null)
-              .marginOnly(right: 5),
-          Offstage(
-            offstage: !ref.value || checkedIcon == null,
-            child: checkedIcon?.marginOnly(right: 5),
-          ),
-          Expanded(
+  final isEnabled = enabled && !isOptFixed;
+  return ValueListenableBuilder<bool>(
+    valueListenable: notifier,
+    builder: (context, value, child) => MouseRegion(
+      cursor: isEnabled ? SystemMouseCursors.click : SystemMouseCursors.basic,
+      child: GestureDetector(
+        onTap: isEnabled
+            ? () {
+                onChanged(!value);
+              }
+            : null,
+        child: Row(
+          children: [
+            // 스타일 체크박스 (24px, 1px 테두리, 4px 둥글기)
+            StyledCheckbox(
+              value: value,
+              onChanged: isEnabled ? onChanged : null,
+              enabled: isEnabled,
+              accentColor: _accentColor,
+            ).marginOnly(right: 8),
+            Offstage(
+              offstage: !value || checkedIcon == null,
+              child: checkedIcon?.marginOnly(right: 5),
+            ),
+            Expanded(
               child: Text(
-            translate(label),
-            style: TextStyle(color: disabledTextColor(context, enabled)),
-          ))
-        ],
+                translate(label),
+                style: TextStyle(
+                  color: enabled
+                      ? const Color(0xFF475569)
+                      : const Color(0xFF94A3B8),
+                  fontSize: _kContentFontSize,
+                ),
+              ),
+            )
+          ],
+        ),
       ),
-    ).marginOnly(left: _kCheckBoxLeftMargin),
-    onTap: enabled && !isOptFixed
-        ? () {
-            onChanged(!ref.value);
-          }
-        : null,
+    ),
   );
 }
 
+/// 설정 옵션 라디오 버튼 위젯
+/// 보라색 테마 적용
 // ignore: non_constant_identifier_names
 Widget _Radio<T>(BuildContext context,
     {required T value,
@@ -2483,21 +2854,35 @@ Widget _Radio<T>(BuildContext context,
           }
         }
       : null;
-  return GestureDetector(
-    child: Row(
-      children: [
-        Radio<T>(value: value, groupValue: groupValue, onChanged: onChange2),
-        Expanded(
-          child: Text(translate(label),
-                  overflow: autoNewLine ? null : TextOverflow.ellipsis,
-                  style: TextStyle(
-                      fontSize: _kContentFontSize,
-                      color: disabledTextColor(context, onChange2 != null)))
-              .marginOnly(left: 5),
-        ),
-      ],
-    ).marginOnly(left: _kRadioLeftMargin),
-    onTap: () => onChange2?.call(value),
+  final bool enabled = onChange2 != null;
+  return MouseRegion(
+    cursor: enabled ? SystemMouseCursors.click : SystemMouseCursors.basic,
+    child: GestureDetector(
+      child: Row(
+        children: [
+          // 커스텀 라디오 버튼 (24px, 1px 테두리)
+          StyledRadio<T>(
+            value: value,
+            groupValue: groupValue,
+            onChanged: onChange2,
+            enabled: enabled,
+            accentColor: _accentColor,
+          ),
+          Expanded(
+            child: Text(
+              translate(label),
+              overflow: autoNewLine ? null : TextOverflow.ellipsis,
+              style: TextStyle(
+                fontSize: _kContentFontSize,
+                color:
+                    enabled ? const Color(0xFF475569) : const Color(0xFF94A3B8),
+              ),
+            ).marginOnly(left: 8),
+          ),
+        ],
+      ),
+      onTap: () => onChange2?.call(value),
+    ),
   );
 }
 
@@ -2559,46 +2944,46 @@ class _WaylandCardState extends State<WaylandCard> {
       showConfirmMsgBox,
       tip: 'clear_Wayland_screen_selection_tip',
       style: ButtonStyle(
-        backgroundColor: MaterialStateProperty.all<Color>(
-            Theme.of(context).colorScheme.error.withOpacity(0.75)),
+        backgroundColor: WidgetStateProperty.all<Color>(
+            Theme.of(context).colorScheme.error.withValues(alpha: 0.75)),
       ),
     );
   }
 }
 
+/// 설정 페이지 버튼 위젯
+/// StyledCompactButton 사용 (styled_form_widgets.dart)
 // ignore: non_constant_identifier_names
 Widget _Button(String label, Function() onPressed,
     {bool enabled = true, String? tip, ButtonStyle? style}) {
-  var button = ElevatedButton(
-    onPressed: enabled ? onPressed : null,
-    child: Text(
-      translate(label),
-    ).marginSymmetric(horizontal: 15),
-    style: style,
-  );
-  StatefulWidget child;
-  if (tip == null) {
-    child = button;
-  } else {
-    child = Tooltip(message: translate(tip), child: button);
-  }
   return Row(children: [
-    child,
-  ]).marginOnly(left: _kContentHMargin);
+    StyledCompactButton(
+      label: translate(label),
+      padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 20),
+      onPressed: enabled ? onPressed : null,
+      fontSize: _kContentFontSize,
+      tooltip: tip != null ? translate(tip) : null,
+    ),
+  ]);
 }
 
+/// 설정 페이지 서브 버튼 위젯
+/// 아웃라인 스타일 서브 버튼
 // ignore: non_constant_identifier_names
 Widget _SubButton(String label, Function() onPressed, [bool enabled = true]) {
   return Row(
     children: [
-      ElevatedButton(
-        onPressed: enabled ? onPressed : null,
-        child: Text(
-          translate(label),
-        ).marginSymmetric(horizontal: 15),
+      IntrinsicWidth(
+        child: StyledOutlinedButton(
+          label: translate(label),
+          onPressed: enabled ? onPressed : null,
+          height: 38,
+          fontSize: _kContentFontSize,
+          padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 16),
+        ),
       ),
     ],
-  ).marginOnly(left: _kContentHSubMargin);
+  ); // _CardChildWrapper가 이미 20px 적용
 }
 
 // ignore: non_constant_identifier_names
@@ -2684,7 +3069,7 @@ _LabeledTextField(
               '${translate(label)}:',
               textAlign: TextAlign.right,
               style: TextStyle(
-                fontSize: 16,
+                fontSize: _kContentFontSize,
                 color: disabledTextColor(context, enabled),
               ),
             ),
@@ -2752,7 +3137,10 @@ class _CountDownButtonState extends State<_CountDownButton> {
 
   @override
   Widget build(BuildContext context) {
-    return ElevatedButton(
+    return StyledCompactButton(
+      label:
+          _isButtonDisabled ? '$_countdownSeconds s' : translate(widget.text),
+      padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 20),
       onPressed: _isButtonDisabled
           ? null
           : () {
@@ -2763,9 +3151,7 @@ class _CountDownButtonState extends State<_CountDownButton> {
               });
               _startCountdownTimer();
             },
-      child: Text(
-        _isButtonDisabled ? '$_countdownSeconds s' : translate(widget.text),
-      ),
+      fontSize: _kContentFontSize,
     );
   }
 }
@@ -2936,8 +3322,15 @@ void changeSocks5Proxy() async {
         ),
       ),
       actions: [
-        dialogButton('Cancel', onPressed: close, isOutline: true),
-        if (!isOptFixed) dialogButton('OK', onPressed: submit),
+        Row(
+          children: [
+            Expanded(child: dialogButton('Cancel', onPressed: close, isOutline: true)),
+            if (!isOptFixed) ...[
+              const SizedBox(width: 12),
+              Expanded(child: dialogButton('OK', onPressed: submit)),
+            ],
+          ],
+        ),
       ],
       onSubmit: submit,
       onCancel: close,

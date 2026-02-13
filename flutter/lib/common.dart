@@ -1,8 +1,11 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io' show Platform, Directory;
 import 'dart:math';
+import 'dart:ui' show lerpDouble;
 
 import 'package:back_button_interceptor/back_button_interceptor.dart';
+import 'package:bot_toast/bot_toast.dart';
 import 'package:desktop_multi_window/desktop_multi_window.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/gestures.dart';
@@ -45,6 +48,20 @@ import 'package:flutter_hbb/native/win32.dart'
 import 'package:flutter_hbb/native/common.dart'
     if (dart.library.html) 'package:flutter_hbb/web/common.dart';
 import 'package:flutter_hbb/utils/http_service.dart' as http;
+import 'package:flutter_hbb/common/api/api_client.dart';
+import 'package:flutter_hbb/common/api/auth_service.dart';
+import 'package:flutter_hbb/common/api/session_service.dart';
+import 'package:flutter_hbb/common/api/payment_service.dart';
+import 'package:flutter_hbb/common/api/google_auth_service.dart';
+import 'package:flutter_hbb/common/api/kakao_auth_service.dart';
+import 'package:flutter_hbb/common/api/naver_auth_service.dart';
+import 'package:flutter_hbb/common/api/mobile_google_auth_service.dart';
+import 'package:flutter_hbb/common/api/mobile_kakao_auth_service.dart';
+import 'package:flutter_hbb/common/api/mobile_naver_auth_service.dart';
+import 'package:flutter_hbb/common/widgets/styled_form_widgets.dart';
+
+/// Google OAuth 딥링크 콜백 컨트롤러
+final googleAuthDeepLinkController = StreamController<Map<String, String?>>.broadcast();
 
 final globalKey = GlobalKey<NavigatorState>();
 final navigationBarKey = GlobalKey();
@@ -109,6 +126,9 @@ enum DesktopType {
   terminal,
   cm,
   portForward,
+  planSelection,
+  voiceCallDialog,
+  cameraRequestDialog,
 }
 
 bool isDoubleEqual(double a, double b) {
@@ -246,6 +266,579 @@ class ColorThemeExtension extends ThemeExtension<ColorThemeExtension> {
   }
 }
 
+/// 사이드바 아이콘 버튼 테마
+class SidebarIconButtonTheme extends ThemeExtension<SidebarIconButtonTheme> {
+  const SidebarIconButtonTheme({
+    required this.backgroundColor,
+    required this.borderColor,
+    required this.hoverBorderColor,
+    required this.iconColor,
+    required this.hoverIconColor,
+    required this.borderRadius,
+    required this.borderWidth,
+    required this.iconSize,
+    required this.padding,
+  });
+
+  final Color backgroundColor;
+  final Color borderColor;
+  final Color hoverBorderColor;
+  final Color iconColor;
+  final Color hoverIconColor;
+  final double borderRadius;
+  final double borderWidth;
+  final double iconSize;
+  final EdgeInsets padding;
+
+  static const light = SidebarIconButtonTheme(
+    backgroundColor: Colors.transparent,
+    borderColor: Color(0xFFB9B8BF),
+    hoverBorderColor: Color(0xFF5F71FF),
+    iconColor: Color(0xFFB9B8BF),
+    hoverIconColor: Color(0xFF5F71FF),
+    borderRadius: 8,
+    borderWidth: 1,
+    iconSize: 20,
+    padding: EdgeInsets.all(15), // 52px 높이: 20(아이콘) + 30(패딩) + 2(보더)
+  );
+
+  static const dark = SidebarIconButtonTheme(
+    backgroundColor: Colors.transparent,
+    borderColor: Color(0xFF555555),
+    hoverBorderColor: Color(0xFF5F71FF),
+    iconColor: Color(0xFF9CA3AF),
+    hoverIconColor: Color(0xFF5F71FF),
+    borderRadius: 8,
+    borderWidth: 1,
+    iconSize: 20,
+    padding: EdgeInsets.all(15), // 52px 높이: 20(아이콘) + 30(패딩) + 2(보더)
+  );
+
+  @override
+  ThemeExtension<SidebarIconButtonTheme> copyWith({
+    Color? backgroundColor,
+    Color? borderColor,
+    Color? hoverBorderColor,
+    Color? iconColor,
+    Color? hoverIconColor,
+    double? borderRadius,
+    double? borderWidth,
+    double? iconSize,
+    EdgeInsets? padding,
+  }) {
+    return SidebarIconButtonTheme(
+      backgroundColor: backgroundColor ?? this.backgroundColor,
+      borderColor: borderColor ?? this.borderColor,
+      hoverBorderColor: hoverBorderColor ?? this.hoverBorderColor,
+      iconColor: iconColor ?? this.iconColor,
+      hoverIconColor: hoverIconColor ?? this.hoverIconColor,
+      borderRadius: borderRadius ?? this.borderRadius,
+      borderWidth: borderWidth ?? this.borderWidth,
+      iconSize: iconSize ?? this.iconSize,
+      padding: padding ?? this.padding,
+    );
+  }
+
+  @override
+  ThemeExtension<SidebarIconButtonTheme> lerp(
+      ThemeExtension<SidebarIconButtonTheme>? other, double t) {
+    if (other is! SidebarIconButtonTheme) {
+      return this;
+    }
+    return SidebarIconButtonTheme(
+      backgroundColor: Color.lerp(backgroundColor, other.backgroundColor, t)!,
+      borderColor: Color.lerp(borderColor, other.borderColor, t)!,
+      hoverBorderColor:
+          Color.lerp(hoverBorderColor, other.hoverBorderColor, t)!,
+      iconColor: Color.lerp(iconColor, other.iconColor, t)!,
+      hoverIconColor: Color.lerp(hoverIconColor, other.hoverIconColor, t)!,
+      borderRadius: borderRadius + (other.borderRadius - borderRadius) * t,
+      borderWidth: borderWidth + (other.borderWidth - borderWidth) * t,
+      iconSize: iconSize + (other.iconSize - iconSize) * t,
+      padding: EdgeInsets.lerp(padding, other.padding, t)!,
+    );
+  }
+}
+
+/// 컴팩트 버튼 테마 (Row용, 부모를 꽉 채우지 않는 버튼)
+/// elevatedButtonTheme과 동일한 디자인, 패딩만 다름
+class CompactButtonTheme extends ThemeExtension<CompactButtonTheme> {
+  const CompactButtonTheme({
+    required this.style,
+  });
+
+  final ButtonStyle style;
+
+  static final light = CompactButtonTheme(
+    style: ElevatedButton.styleFrom(
+      backgroundColor: const Color(0xFF5B7BF8),
+      foregroundColor: Colors.white,
+      disabledBackgroundColor: Colors.grey[300],
+      disabledForegroundColor: Colors.grey[500],
+      elevation: 0,
+      minimumSize: const Size(0, 54),
+      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+      padding: const EdgeInsets.symmetric(horizontal: 24),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(8.0),
+      ),
+      textStyle: const TextStyle(fontSize: 16, fontWeight: FontWeight.w500),
+    ),
+  );
+
+  static final dark = CompactButtonTheme(
+    style: ElevatedButton.styleFrom(
+      backgroundColor: const Color(0xFF5B7BF8),
+      foregroundColor: Colors.white,
+      disabledForegroundColor: Colors.white70,
+      disabledBackgroundColor: Colors.white10,
+      elevation: 0,
+      minimumSize: const Size(0, 54),
+      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+      padding: const EdgeInsets.symmetric(horizontal: 24),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(8.0),
+      ),
+      textStyle: const TextStyle(fontSize: 16, fontWeight: FontWeight.w500),
+    ),
+  );
+
+  @override
+  ThemeExtension<CompactButtonTheme> copyWith({ButtonStyle? style}) {
+    return CompactButtonTheme(style: style ?? this.style);
+  }
+
+  @override
+  ThemeExtension<CompactButtonTheme> lerp(
+      ThemeExtension<CompactButtonTheme>? other, double t) {
+    if (other is! CompactButtonTheme) {
+      return this;
+    }
+    return CompactButtonTheme(
+      style: ButtonStyle.lerp(style, other.style, t)!,
+    );
+  }
+}
+
+/// 컨텐츠 카드 테마 (연결 페이지, 세팅 페이지 등에서 사용)
+class ContentCardTheme extends ThemeExtension<ContentCardTheme> {
+  const ContentCardTheme({
+    required this.backgroundColor,
+    required this.titleColor,
+    required this.titleFontSize,
+    required this.dividerColor,
+    required this.borderRadius,
+    required this.shadowColor,
+    required this.shadowBlurRadius,
+    required this.shadowOffset,
+    required this.horizontalPadding,
+  });
+
+  final Color backgroundColor;
+  final Color titleColor;
+  final double titleFontSize;
+  final Color dividerColor;
+  final double borderRadius;
+  final Color shadowColor;
+  final double shadowBlurRadius;
+  final Offset shadowOffset;
+  final double horizontalPadding;
+
+  static const light = ContentCardTheme(
+    backgroundColor: Colors.white,
+    titleColor: Color(0xFF1E293B),
+    titleFontSize: 18,
+    dividerColor: Color(0xFFE5E7EB),
+    borderRadius: 16,
+    shadowColor: Color(0x1A000000), // black 10%
+    shadowBlurRadius: 5,
+    shadowOffset: Offset(0, 2),
+    horizontalPadding: 20,
+  );
+
+  static const dark = ContentCardTheme(
+    backgroundColor: Color(0xFF24252B),
+    titleColor: Color(0xFFE5E7EB),
+    titleFontSize: 18,
+    dividerColor: Color(0xFF3F4046),
+    borderRadius: 16,
+    shadowColor: Color(0x33000000), // black 20%
+    shadowBlurRadius: 5,
+    shadowOffset: Offset(0, 2),
+    horizontalPadding: 20,
+  );
+
+  @override
+  ThemeExtension<ContentCardTheme> copyWith({
+    Color? backgroundColor,
+    Color? titleColor,
+    double? titleFontSize,
+    Color? dividerColor,
+    double? borderRadius,
+    Color? shadowColor,
+    double? shadowBlurRadius,
+    Offset? shadowOffset,
+    double? horizontalPadding,
+  }) {
+    return ContentCardTheme(
+      backgroundColor: backgroundColor ?? this.backgroundColor,
+      titleColor: titleColor ?? this.titleColor,
+      titleFontSize: titleFontSize ?? this.titleFontSize,
+      dividerColor: dividerColor ?? this.dividerColor,
+      borderRadius: borderRadius ?? this.borderRadius,
+      shadowColor: shadowColor ?? this.shadowColor,
+      shadowBlurRadius: shadowBlurRadius ?? this.shadowBlurRadius,
+      shadowOffset: shadowOffset ?? this.shadowOffset,
+      horizontalPadding: horizontalPadding ?? this.horizontalPadding,
+    );
+  }
+
+  @override
+  ThemeExtension<ContentCardTheme> lerp(
+      ThemeExtension<ContentCardTheme>? other, double t) {
+    if (other is! ContentCardTheme) {
+      return this;
+    }
+    return ContentCardTheme(
+      backgroundColor: Color.lerp(backgroundColor, other.backgroundColor, t)!,
+      titleColor: Color.lerp(titleColor, other.titleColor, t)!,
+      titleFontSize: lerpDouble(titleFontSize, other.titleFontSize, t)!,
+      dividerColor: Color.lerp(dividerColor, other.dividerColor, t)!,
+      borderRadius: lerpDouble(borderRadius, other.borderRadius, t)!,
+      shadowColor: Color.lerp(shadowColor, other.shadowColor, t)!,
+      shadowBlurRadius:
+          lerpDouble(shadowBlurRadius, other.shadowBlurRadius, t)!,
+      shadowOffset: Offset.lerp(shadowOffset, other.shadowOffset, t)!,
+      horizontalPadding:
+          lerpDouble(horizontalPadding, other.horizontalPadding, t)!,
+    );
+  }
+}
+
+/// 피어 카드 테마 확장
+/// Peer card theme extension
+class PeerCardTheme extends ThemeExtension<PeerCardTheme> {
+  const PeerCardTheme({
+    required this.topBackgroundColor,
+    required this.bottomBackgroundColor,
+    required this.borderColor,
+    required this.hoverBorderColor,
+    required this.accentColor,
+    required this.noteTextColor,
+    required this.cardRadius,
+    required this.borderWidth,
+  });
+
+  final Color topBackgroundColor; // 상단 영역 배경색
+  final Color bottomBackgroundColor; // 하단 영역 배경색
+  final Color borderColor; // 테두리 색상
+  final Color hoverBorderColor; // 호버시 테두리 색상
+  final Color accentColor; // 아이콘/텍스트 강조 색상
+  final Color noteTextColor; // 노트 텍스트 색상
+  final double cardRadius; // 카드 모서리 반경
+  final double borderWidth; // 호버 테두리 두께
+
+  static const light = PeerCardTheme(
+    topBackgroundColor: Color(0xFFEFF1FF),
+    bottomBackgroundColor: Color(0xFFFEFEFE),
+    borderColor: Color(0xFFF2F1F6),
+    hoverBorderColor: Color(0xFF5F71FF),
+    accentColor: Color(0xFF5F71FF),
+    noteTextColor: Color(0xFF9FA8DA),
+    cardRadius: 16,
+    borderWidth: 2,
+  );
+
+  static const dark = PeerCardTheme(
+    topBackgroundColor: Color(0xFF2A2B33),
+    bottomBackgroundColor: Color(0xFF1E1F26),
+    borderColor: Color(0xFF3F4046),
+    hoverBorderColor: Color(0xFF5F71FF),
+    accentColor: Color(0xFF7B8CFF),
+    noteTextColor: Color(0xFF9FA8DA),
+    cardRadius: 16,
+    borderWidth: 2,
+  );
+
+  @override
+  ThemeExtension<PeerCardTheme> copyWith({
+    Color? topBackgroundColor,
+    Color? bottomBackgroundColor,
+    Color? borderColor,
+    Color? hoverBorderColor,
+    Color? accentColor,
+    Color? noteTextColor,
+    double? cardRadius,
+    double? borderWidth,
+  }) {
+    return PeerCardTheme(
+      topBackgroundColor: topBackgroundColor ?? this.topBackgroundColor,
+      bottomBackgroundColor:
+          bottomBackgroundColor ?? this.bottomBackgroundColor,
+      borderColor: borderColor ?? this.borderColor,
+      hoverBorderColor: hoverBorderColor ?? this.hoverBorderColor,
+      accentColor: accentColor ?? this.accentColor,
+      noteTextColor: noteTextColor ?? this.noteTextColor,
+      cardRadius: cardRadius ?? this.cardRadius,
+      borderWidth: borderWidth ?? this.borderWidth,
+    );
+  }
+
+  @override
+  ThemeExtension<PeerCardTheme> lerp(
+      ThemeExtension<PeerCardTheme>? other, double t) {
+    if (other is! PeerCardTheme) {
+      return this;
+    }
+    return PeerCardTheme(
+      topBackgroundColor:
+          Color.lerp(topBackgroundColor, other.topBackgroundColor, t)!,
+      bottomBackgroundColor:
+          Color.lerp(bottomBackgroundColor, other.bottomBackgroundColor, t)!,
+      borderColor: Color.lerp(borderColor, other.borderColor, t)!,
+      hoverBorderColor:
+          Color.lerp(hoverBorderColor, other.hoverBorderColor, t)!,
+      accentColor: Color.lerp(accentColor, other.accentColor, t)!,
+      noteTextColor: Color.lerp(noteTextColor, other.noteTextColor, t)!,
+      cardRadius: lerpDouble(cardRadius, other.cardRadius, t)!,
+      borderWidth: lerpDouble(borderWidth, other.borderWidth, t)!,
+    );
+  }
+}
+
+/// 피어 탭 테마 확장
+/// Peer tab theme extension
+class PeerTabTheme extends ThemeExtension<PeerTabTheme> {
+  const PeerTabTheme({
+    required this.selectedBackgroundColor,
+    required this.selectedTextColor,
+    required this.unselectedTextColor,
+    required this.listSelectedColor,
+    required this.fontSize,
+    required this.borderRadius,
+    required this.height,
+    required this.horizontalPadding,
+    required this.verticalPadding,
+  });
+
+  final Color selectedBackgroundColor; // 선택된 탭 배경색
+  final Color selectedTextColor; // 선택된 탭 텍스트 색상
+  final Color unselectedTextColor; // 비선택 탭 텍스트 색상
+  final Color listSelectedColor; // 리스트 선택 항목 색상
+  final double fontSize; // 텍스트 크기
+  final double borderRadius; // 탭 모서리 반경
+  final double height; // 탭 높이
+  final double horizontalPadding; // 좌우 패딩
+  final double verticalPadding; // 상하 패딩
+
+  static const light = PeerTabTheme(
+    selectedBackgroundColor: Colors.black,
+    selectedTextColor: Colors.white,
+    unselectedTextColor: Color(0xFF6B7280), // placeholder 색상과 동일
+    listSelectedColor: Color(0xFF5F71FF), // 리스트 선택 색상 (버튼 호버 색상)
+    fontSize: 16,
+    borderRadius: 6,
+    height: 52,
+    horizontalPadding: 16,
+    verticalPadding: 14,
+  );
+
+  static const dark = PeerTabTheme(
+    selectedBackgroundColor: Color(0xFF5F71FF),
+    selectedTextColor: Colors.white,
+    unselectedTextColor: Color(0xFF9CA3AF),
+    listSelectedColor: Color(0xFF5F71FF), // 리스트 선택 색상 (버튼 호버 색상)
+    fontSize: 16,
+    borderRadius: 6,
+    height: 52,
+    horizontalPadding: 16,
+    verticalPadding: 14,
+  );
+
+  @override
+  ThemeExtension<PeerTabTheme> copyWith({
+    Color? selectedBackgroundColor,
+    Color? selectedTextColor,
+    Color? unselectedTextColor,
+    Color? listSelectedColor,
+    double? fontSize,
+    double? borderRadius,
+    double? height,
+    double? horizontalPadding,
+    double? verticalPadding,
+  }) {
+    return PeerTabTheme(
+      selectedBackgroundColor:
+          selectedBackgroundColor ?? this.selectedBackgroundColor,
+      selectedTextColor: selectedTextColor ?? this.selectedTextColor,
+      unselectedTextColor: unselectedTextColor ?? this.unselectedTextColor,
+      listSelectedColor: listSelectedColor ?? this.listSelectedColor,
+      fontSize: fontSize ?? this.fontSize,
+      borderRadius: borderRadius ?? this.borderRadius,
+      height: height ?? this.height,
+      horizontalPadding: horizontalPadding ?? this.horizontalPadding,
+      verticalPadding: verticalPadding ?? this.verticalPadding,
+    );
+  }
+
+  @override
+  ThemeExtension<PeerTabTheme> lerp(
+      ThemeExtension<PeerTabTheme>? other, double t) {
+    if (other is! PeerTabTheme) {
+      return this;
+    }
+    return PeerTabTheme(
+      selectedBackgroundColor: Color.lerp(
+          selectedBackgroundColor, other.selectedBackgroundColor, t)!,
+      selectedTextColor:
+          Color.lerp(selectedTextColor, other.selectedTextColor, t)!,
+      unselectedTextColor:
+          Color.lerp(unselectedTextColor, other.unselectedTextColor, t)!,
+      listSelectedColor:
+          Color.lerp(listSelectedColor, other.listSelectedColor, t)!,
+      fontSize: lerpDouble(fontSize, other.fontSize, t)!,
+      borderRadius: lerpDouble(borderRadius, other.borderRadius, t)!,
+      height: lerpDouble(height, other.height, t)!,
+      horizontalPadding:
+          lerpDouble(horizontalPadding, other.horizontalPadding, t)!,
+      verticalPadding: lerpDouble(verticalPadding, other.verticalPadding, t)!,
+    );
+  }
+}
+
+/// 설정 페이지 탭 테마 확장
+/// Setting page tab theme extension
+class SettingTabTheme extends ThemeExtension<SettingTabTheme> {
+  const SettingTabTheme({
+    required this.selectedBackgroundColor,
+    required this.selectedTextColor,
+    required this.selectedIconColor,
+    required this.unselectedTextColor,
+    required this.unselectedIconColor,
+    required this.fontSize,
+    required this.iconSize,
+    required this.borderRadius,
+    required this.height,
+    required this.horizontalPadding,
+    required this.sidebarWidth,
+    required this.sidebarBackgroundColor,
+    required this.contentBackgroundColor,
+  });
+
+  final Color selectedBackgroundColor; // 선택된 탭 배경색
+  final Color selectedTextColor; // 선택된 탭 텍스트 색상
+  final Color selectedIconColor; // 선택된 탭 아이콘 색상
+  final Color unselectedTextColor; // 비선택 탭 텍스트 색상
+  final Color unselectedIconColor; // 비선택 탭 아이콘 색상
+  final double fontSize; // 텍스트 크기
+  final double iconSize; // 아이콘 크기
+  final double borderRadius; // 탭 모서리 반경
+  final double height; // 탭 높이
+  final double horizontalPadding; // 좌우 패딩
+  final double sidebarWidth; // 사이드바 너비
+  final Color sidebarBackgroundColor; // 사이드바 배경색
+  final Color contentBackgroundColor; // 콘텐츠 영역 배경색
+
+  static const light = SettingTabTheme(
+    selectedBackgroundColor: Color(0xFF5F71FF), // 선택된 탭 배경: 파란색
+    selectedTextColor: Color(0xFFFEFEFE), // 선택된 탭 텍스트: 흰색
+    selectedIconColor: Color(0xFFFEFEFE), // 선택된 탭 아이콘: 흰색
+    unselectedTextColor: Color(0xFFB9B8BF), // 비선택 탭 텍스트: 회색
+    unselectedIconColor: Color(0xFFB9B8BF), // 비선택 탭 아이콘: 회색
+    fontSize: 16,
+    iconSize: 20,
+    borderRadius: 8,
+    height: 48,
+    horizontalPadding: 12,
+    sidebarWidth: 240,
+    sidebarBackgroundColor: Color(0xFFF7F7F7),
+    contentBackgroundColor: Color(0xFFFEFEFE),
+  );
+
+  static const dark = SettingTabTheme(
+    selectedBackgroundColor: Color(0xFF5F71FF),
+    selectedTextColor: Color(0xFFFEFEFE),
+    selectedIconColor: Color(0xFFFEFEFE),
+    unselectedTextColor: Color(0xFFB9B8BF),
+    unselectedIconColor: Color(0xFFB9B8BF),
+    fontSize: 16,
+    iconSize: 20,
+    borderRadius: 8,
+    height: 48,
+    horizontalPadding: 12,
+    sidebarWidth: 240,
+    sidebarBackgroundColor: Color(0xFF1E1E1E),
+    contentBackgroundColor: Color(0xFF121212),
+  );
+
+  @override
+  ThemeExtension<SettingTabTheme> copyWith({
+    Color? selectedBackgroundColor,
+    Color? selectedTextColor,
+    Color? selectedIconColor,
+    Color? unselectedTextColor,
+    Color? unselectedIconColor,
+    double? fontSize,
+    double? iconSize,
+    double? borderRadius,
+    double? height,
+    double? horizontalPadding,
+    double? sidebarWidth,
+    Color? sidebarBackgroundColor,
+    Color? contentBackgroundColor,
+  }) {
+    return SettingTabTheme(
+      selectedBackgroundColor:
+          selectedBackgroundColor ?? this.selectedBackgroundColor,
+      selectedTextColor: selectedTextColor ?? this.selectedTextColor,
+      selectedIconColor: selectedIconColor ?? this.selectedIconColor,
+      unselectedTextColor: unselectedTextColor ?? this.unselectedTextColor,
+      unselectedIconColor: unselectedIconColor ?? this.unselectedIconColor,
+      fontSize: fontSize ?? this.fontSize,
+      iconSize: iconSize ?? this.iconSize,
+      borderRadius: borderRadius ?? this.borderRadius,
+      height: height ?? this.height,
+      horizontalPadding: horizontalPadding ?? this.horizontalPadding,
+      sidebarWidth: sidebarWidth ?? this.sidebarWidth,
+      sidebarBackgroundColor:
+          sidebarBackgroundColor ?? this.sidebarBackgroundColor,
+      contentBackgroundColor:
+          contentBackgroundColor ?? this.contentBackgroundColor,
+    );
+  }
+
+  @override
+  ThemeExtension<SettingTabTheme> lerp(
+      ThemeExtension<SettingTabTheme>? other, double t) {
+    if (other is! SettingTabTheme) {
+      return this;
+    }
+    return SettingTabTheme(
+      selectedBackgroundColor: Color.lerp(
+          selectedBackgroundColor, other.selectedBackgroundColor, t)!,
+      selectedTextColor:
+          Color.lerp(selectedTextColor, other.selectedTextColor, t)!,
+      selectedIconColor:
+          Color.lerp(selectedIconColor, other.selectedIconColor, t)!,
+      unselectedTextColor:
+          Color.lerp(unselectedTextColor, other.unselectedTextColor, t)!,
+      unselectedIconColor:
+          Color.lerp(unselectedIconColor, other.unselectedIconColor, t)!,
+      fontSize: lerpDouble(fontSize, other.fontSize, t)!,
+      iconSize: lerpDouble(iconSize, other.iconSize, t)!,
+      borderRadius: lerpDouble(borderRadius, other.borderRadius, t)!,
+      height: lerpDouble(height, other.height, t)!,
+      horizontalPadding:
+          lerpDouble(horizontalPadding, other.horizontalPadding, t)!,
+      sidebarWidth: lerpDouble(sidebarWidth, other.sidebarWidth, t)!,
+      sidebarBackgroundColor:
+          Color.lerp(sidebarBackgroundColor, other.sidebarBackgroundColor, t)!,
+      contentBackgroundColor:
+          Color.lerp(contentBackgroundColor, other.contentBackgroundColor, t)!,
+    );
+  }
+}
+
 class MyTheme {
   MyTheme._();
 
@@ -261,6 +854,12 @@ class MyTheme {
   static const Color dark = Colors.black87;
   static const Color button = Color(0xFF2C8CFF);
   static const Color hoverBorder = Color(0xFF999999);
+
+  // Dialog Title Style
+  static const TextStyle dialogTitleStyle = TextStyle(
+    fontSize: 18,
+    fontWeight: FontWeight.w600,
+  );
 
   // ListTile
   static const ListTileThemeData listTileTheme = ListTileThemeData(
@@ -329,7 +928,7 @@ class MyTheme {
 
     return (isDesktop || isWebDesktop)
         ? EdgeInsets.fromLTRB(p, p, p, actions ? (p - 4) : p)
-        : EdgeInsets.fromLTRB(p, p, p, actions ? (p / 2) : p);
+        : EdgeInsets.fromLTRB(p, p, p, actions ? 8 : p); // 모바일: 버튼과 균형 맞춤
   }
 
   static EdgeInsets dialogActionsPadding() {
@@ -337,12 +936,12 @@ class MyTheme {
 
     return (isDesktop || isWebDesktop)
         ? EdgeInsets.fromLTRB(p, 0, p, (p - 4))
-        : EdgeInsets.fromLTRB(p, 0, (p - mobileTextButtonPaddingLR), (p / 2));
+        : EdgeInsets.fromLTRB(p, 0, p, (p / 2)); // 모바일: 컨텐츠 하단 패딩(12)이 있어서 상단 0
   }
 
   static EdgeInsets dialogButtonPadding = (isDesktop || isWebDesktop)
       ? EdgeInsets.only(left: dialogPadding)
-      : EdgeInsets.only(left: dialogPadding / 3);
+      : EdgeInsets.zero; // 모바일에서는 Row로 버튼 배치하므로 패딩 제거
 
   static ScrollbarThemeData scrollbarTheme = ScrollbarThemeData(
     thickness: MaterialStateProperty.all(6),
@@ -380,10 +979,10 @@ class MyTheme {
     appBarTheme: AppBarTheme(
       shadowColor: Colors.transparent,
     ),
-    dialogTheme: DialogTheme(
+    dialogTheme: const DialogThemeData(
       elevation: 15,
       shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(18.0),
+        borderRadius: BorderRadius.all(Radius.circular(18)),
         side: BorderSide(
           width: 1,
           color: grayBg,
@@ -393,25 +992,39 @@ class MyTheme {
     scrollbarTheme: scrollbarTheme,
     inputDecorationTheme: isDesktop
         ? InputDecorationTheme(
-            fillColor: grayBg,
+            fillColor: Colors.white,
             filled: true,
-            isDense: true,
+            hintStyle: TextStyle(fontSize: 15, color: Colors.grey[400]),
+            contentPadding:
+                const EdgeInsets.symmetric(horizontal: 23, vertical: 23),
             border: OutlineInputBorder(
               borderRadius: BorderRadius.circular(8),
+              borderSide: BorderSide(color: Colors.grey[300]!),
+            ),
+            enabledBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(8),
+              borderSide: BorderSide(color: Colors.grey[300]!),
+            ),
+            focusedBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(8),
+              borderSide: const BorderSide(color: Color(0xFF5B7BF8)),
             ),
           )
         : null,
     textTheme: const TextTheme(
-        titleLarge: TextStyle(fontSize: 19, color: Colors.black87),
-        titleSmall: TextStyle(fontSize: 14, color: Colors.black87),
-        bodySmall: TextStyle(fontSize: 12, color: Colors.black87, height: 1.25),
+        titleLarge: TextStyle(
+            fontSize: 20,
+            color: Color(0xFF111827),
+            fontWeight: FontWeight.w600),
+        titleSmall: TextStyle(fontSize: 18, color: Colors.black87),
+        bodySmall: TextStyle(fontSize: 14, color: Colors.black87, height: 1.25),
         bodyMedium:
-            TextStyle(fontSize: 14, color: Colors.black87, height: 1.25),
+            TextStyle(fontSize: 16, color: Colors.black87, height: 1.25),
         labelLarge: TextStyle(fontSize: 16.0, color: MyTheme.accent80)),
     cardColor: grayBg,
     hintColor: Color(0xFFAAAAAA),
     visualDensity: VisualDensity.adaptivePlatformDensity,
-    tabBarTheme: const TabBarTheme(
+    tabBarTheme: const TabBarThemeData(
       labelColor: Colors.black87,
     ),
     tooltipTheme: tooltipTheme(),
@@ -430,19 +1043,30 @@ class MyTheme {
         : mobileTextButtonTheme,
     elevatedButtonTheme: ElevatedButtonThemeData(
       style: ElevatedButton.styleFrom(
-        backgroundColor: MyTheme.accent,
+        backgroundColor: const Color(0xFF5B7BF8),
+        foregroundColor: Colors.white,
+        disabledBackgroundColor: Colors.grey[300],
+        disabledForegroundColor: Colors.grey[500],
+        elevation: 0,
+        minimumSize: const Size(double.infinity, 56),
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(8.0),
         ),
+        textStyle: const TextStyle(fontSize: 16, fontWeight: FontWeight.w500),
       ),
     ),
     outlinedButtonTheme: OutlinedButtonThemeData(
       style: OutlinedButton.styleFrom(
-        backgroundColor: grayBg,
-        foregroundColor: Colors.black87,
+        backgroundColor: Colors.white,
+        foregroundColor: Colors.grey[600],
+        disabledBackgroundColor: Colors.grey[100],
+        disabledForegroundColor: Colors.grey[400],
+        minimumSize: const Size(double.infinity, 56),
+        side: BorderSide(color: Colors.grey[300]!),
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(8.0),
         ),
+        textStyle: const TextStyle(fontSize: 16, fontWeight: FontWeight.w500),
       ),
     ),
     switchTheme: switchTheme(),
@@ -467,6 +1091,12 @@ class MyTheme {
     extensions: <ThemeExtension<dynamic>>[
       ColorThemeExtension.light,
       TabbarTheme.light,
+      SidebarIconButtonTheme.light,
+      CompactButtonTheme.light,
+      ContentCardTheme.light,
+      PeerCardTheme.light,
+      PeerTabTheme.light,
+      SettingTabTheme.light,
     ],
   );
   static ThemeData darkTheme = ThemeData(
@@ -478,10 +1108,10 @@ class MyTheme {
     appBarTheme: AppBarTheme(
       shadowColor: Colors.transparent,
     ),
-    dialogTheme: DialogTheme(
+    dialogTheme: const DialogThemeData(
       elevation: 15,
       shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(18.0),
+        borderRadius: BorderRadius.all(Radius.circular(18)),
         side: BorderSide(
           width: 1,
           color: Color(0xFF24252B),
@@ -500,10 +1130,10 @@ class MyTheme {
           )
         : null,
     textTheme: const TextTheme(
-      titleLarge: TextStyle(fontSize: 19),
-      titleSmall: TextStyle(fontSize: 14),
-      bodySmall: TextStyle(fontSize: 12, height: 1.25),
-      bodyMedium: TextStyle(fontSize: 14, height: 1.25),
+      titleLarge: TextStyle(fontSize: 20),
+      titleSmall: TextStyle(fontSize: 18),
+      bodySmall: TextStyle(fontSize: 14, height: 1.25),
+      bodyMedium: TextStyle(fontSize: 16, height: 1.25),
       labelLarge: TextStyle(
         fontSize: 16.0,
         fontWeight: FontWeight.bold,
@@ -512,7 +1142,7 @@ class MyTheme {
     ),
     cardColor: Color(0xFF24252B),
     visualDensity: VisualDensity.adaptivePlatformDensity,
-    tabBarTheme: const TabBarTheme(
+    tabBarTheme: const TabBarThemeData(
       labelColor: Colors.white70,
     ),
     tooltipTheme: tooltipTheme(),
@@ -533,24 +1163,30 @@ class MyTheme {
         : mobileTextButtonTheme,
     elevatedButtonTheme: ElevatedButtonThemeData(
       style: ElevatedButton.styleFrom(
-        backgroundColor: MyTheme.accent,
+        backgroundColor: const Color(0xFF5B7BF8),
         foregroundColor: Colors.white,
         disabledForegroundColor: Colors.white70,
         disabledBackgroundColor: Colors.white10,
+        elevation: 0,
+        minimumSize: const Size(double.infinity, 56),
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(8.0),
         ),
+        textStyle: const TextStyle(fontSize: 16, fontWeight: FontWeight.w500),
       ),
     ),
     outlinedButtonTheme: OutlinedButtonThemeData(
       style: OutlinedButton.styleFrom(
         backgroundColor: Color(0xFF24252B),
-        side: BorderSide(color: Colors.white12, width: 0.5),
-        disabledForegroundColor: Colors.white70,
         foregroundColor: Colors.white70,
+        disabledForegroundColor: Colors.white38,
+        disabledBackgroundColor: Color(0xFF1A1B20),
+        minimumSize: const Size(double.infinity, 56),
+        side: BorderSide(color: Colors.white12, width: 0.5),
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(8.0),
         ),
+        textStyle: const TextStyle(fontSize: 16, fontWeight: FontWeight.w500),
       ),
     ),
     switchTheme: switchTheme(),
@@ -574,6 +1210,12 @@ class MyTheme {
     extensions: <ThemeExtension<dynamic>>[
       ColorThemeExtension.dark,
       TabbarTheme.dark,
+      SidebarIconButtonTheme.dark,
+      CompactButtonTheme.dark,
+      ContentCardTheme.dark,
+      PeerCardTheme.dark,
+      PeerTabTheme.dark,
+      SettingTabTheme.dark,
     ],
   );
 
@@ -617,6 +1259,26 @@ class MyTheme {
 
   static TabbarTheme tabbar(BuildContext context) {
     return Theme.of(context).extension<TabbarTheme>()!;
+  }
+
+  static SidebarIconButtonTheme sidebarIconButton(BuildContext context) {
+    return Theme.of(context).extension<SidebarIconButtonTheme>()!;
+  }
+
+  static CompactButtonTheme compactButton(BuildContext context) {
+    return Theme.of(context).extension<CompactButtonTheme>()!;
+  }
+
+  static PeerCardTheme peerCard(BuildContext context) {
+    return Theme.of(context).extension<PeerCardTheme>()!;
+  }
+
+  static PeerTabTheme peerTab(BuildContext context) {
+    return Theme.of(context).extension<PeerTabTheme>()!;
+  }
+
+  static SettingTabTheme settingTab(BuildContext context) {
+    return Theme.of(context).extension<SettingTabTheme>()!;
   }
 
   static ThemeMode themeModeFromString(String v) {
@@ -732,12 +1394,12 @@ Future<void> windowOnTop(int? id) async {
     }
     await windowManager.show();
     await windowManager.focus();
-    await rustDeskWinManager.registerActiveWindow(kWindowMainId);
+    await oneDeskWinManager.registerActiveWindow(kWindowMainId);
   } else {
     WindowController.fromWindowId(id)
       ..focus()
       ..show();
-    rustDeskWinManager.call(WindowType.Main, kWindowEventShow, {"id": id});
+    oneDeskWinManager.call(WindowType.Main, kWindowEventShow, {"id": id});
   }
 }
 
@@ -895,32 +1557,84 @@ class OverlayDialogManager {
         }
       }
 
+      const primaryColor = Color(0xFF5F71FF);
+
       return CustomAlertDialog(
+        title: Text(
+          translate('Connecting'),
+          style: const TextStyle(
+            fontSize: 18,
+            fontWeight: FontWeight.bold,
+          ),
+        ),
         content: Container(
-            constraints: const BoxConstraints(maxWidth: 240),
-            child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const SizedBox(height: 30),
-                  const Center(child: CircularProgressIndicator()),
-                  const SizedBox(height: 20),
-                  Center(
-                      child: Text(translate(text),
-                          style: const TextStyle(fontSize: 15))),
-                  const SizedBox(height: 20),
-                  Offstage(
-                      offstage: !showCancel,
-                      child: Center(
-                          child: (isDesktop || isWebDesktop)
-                              ? dialogButton('Cancel', onPressed: cancel)
-                              : TextButton(
-                                  style: flatButtonStyle,
-                                  onPressed: cancel,
-                                  child: Text(translate('Cancel'),
-                                      style: const TextStyle(
-                                          color: MyTheme.accent)))))
-                ])),
+            constraints: const BoxConstraints(maxWidth: 280),
+            child: Column(mainAxisSize: MainAxisSize.min, children: [
+              const SizedBox(height: 24),
+              // 로고와 회전하는 원형 테두리
+              SizedBox(
+                width: 80,
+                height: 80,
+                child: Stack(
+                  alignment: Alignment.center,
+                  children: [
+                    // 회전하는 원형 테두리
+                    SizedBox(
+                      width: 80,
+                      height: 80,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 3,
+                        valueColor: AlwaysStoppedAnimation<Color>(
+                            primaryColor.withOpacity(0.7)),
+                        backgroundColor: primaryColor.withOpacity(0.15),
+                      ),
+                    ),
+                    // 중앙 로고
+                    SvgPicture.asset(
+                      'assets/icons/topbar-logo.svg',
+                      width: 32,
+                      height: 32,
+                      colorFilter:
+                          const ColorFilter.mode(primaryColor, BlendMode.srcIn),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 24),
+              // 안내 텍스트
+              Text(
+                translate('Preparing for remote connection.'),
+                textAlign: TextAlign.center,
+                style: const TextStyle(
+                  fontSize: 14,
+                  color: primaryColor,
+                ),
+              ),
+              const SizedBox(height: 32),
+              // 취소 버튼
+              Offstage(
+                  offstage: !showCancel,
+                  child: SizedBox(
+                    width: double.infinity,
+                    child: ElevatedButton(
+                      onPressed: cancel,
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: primaryColor,
+                        padding: const EdgeInsets.symmetric(vertical: 14),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                      ),
+                      child: Text(
+                        translate('Cancel'),
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 15,
+                        ),
+                      ),
+                    ),
+                  )),
+            ])),
         onCancel: showCancel ? cancel : null,
       );
     }, tag: tag);
@@ -1038,6 +1752,85 @@ void showToast(String text, {Duration timeout = const Duration(seconds: 3)}) {
   });
   overlayState.insert(entry);
   Future.delayed(timeout, () {
+    entry.remove();
+  });
+}
+
+/// 파일 저장 완료 토스트 (보러가기 버튼 포함)
+/// BotToast는 원격 페이지의 자체 Overlay와 충돌하므로
+/// Navigator의 overlay를 직접 사용
+void showFileSavedToast(String message, String filePath) {
+  final overlayState = globalKey.currentState?.overlay;
+  if (overlayState == null) return;
+
+  // 파일 경로에서 디렉토리 추출
+  String dirPath = filePath;
+  final lastSep = filePath.lastIndexOf(Platform.pathSeparator);
+  if (lastSep > 0) {
+    dirPath = filePath.substring(0, lastSep);
+  }
+
+  late OverlayEntry entry;
+  entry = OverlayEntry(builder: (context) {
+    return Align(
+      alignment: const Alignment(0, 0.9),
+      child: Material(
+        color: Colors.transparent,
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+          decoration: BoxDecoration(
+            color: const Color(0xE6303030),
+            borderRadius: BorderRadius.circular(8),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                message,
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 14,
+                  decoration: TextDecoration.none,
+                  fontWeight: FontWeight.normal,
+                ),
+              ),
+              const SizedBox(width: 12),
+              GestureDetector(
+                onTap: () {
+                  entry.remove();
+                  if (isAndroid) {
+                    platformFFI.invokeMethod("open_folder", dirPath);
+                  } else {
+                    launchUrl(Uri.directory(dirPath));
+                  }
+                },
+                child: const Text(
+                  '보러가기',
+                  style: TextStyle(
+                    color: Color(0xFF8B7BF7),
+                    fontSize: 14,
+                    decoration: TextDecoration.none,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 8),
+              GestureDetector(
+                onTap: () => entry.remove(),
+                child: const Icon(
+                  Icons.close,
+                  color: Colors.white54,
+                  size: 18,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  });
+  overlayState.insert(entry);
+  Future.delayed(const Duration(seconds: 5), () {
     entry.remove();
   });
 }
@@ -1205,7 +1998,10 @@ void msgBox(SessionID sessionId, String type, String title, String text,
         submitOnTimeout: true,
       );
     } else {
-      btn = dialogButton('OK', onPressed: submit);
+      btn = StyledPrimaryButton(
+        label: translate('OK'),
+        onPressed: submit,
+      );
     }
     buttons.insert(0, btn);
   }
@@ -1214,17 +2010,24 @@ void msgBox(SessionID sessionId, String type, String title, String text,
       type != "restarting";
   if (hasCancel) {
     buttons.insert(
-        0, dialogButton('Cancel', onPressed: cancel, isOutline: true));
+        0,
+        StyledOutlinedButton(
+          label: translate('Cancel'),
+          onPressed: cancel,
+        ));
   }
   if (type.contains("hasclose")) {
     buttons.insert(
         0,
-        dialogButton('Close', onPressed: () {
-          dialogManager.dismissAll();
-        }));
+        StyledOutlinedButton(
+          label: translate('Close'),
+          onPressed: () {
+            dialogManager.dismissAll();
+          },
+        ));
   }
   if (reconnect != null &&
-      title == "Connection Error" &&
+      title == "Connection decline" &&
       reconnectTimeout != null) {
     // `enabled` is used to disable the dialog button once the button is clicked.
     final enabled = true.obs;
@@ -1242,13 +2045,34 @@ void msgBox(SessionID sessionId, String type, String title, String text,
     buttons.insert(0, button);
   }
   if (link.isNotEmpty) {
-    buttons.insert(0, dialogButton('JumpLink', onPressed: jumplink));
+    buttons.insert(
+        0,
+        StyledOutlinedButton(
+          label: translate('JumpLink'),
+          onPressed: jumplink,
+        ));
   }
+  // 버튼이 2개일 때 가로 배치 (Cancel + OK)
+  final List<Widget> dialogActions;
+  if (buttons.length == 2) {
+    dialogActions = [
+      Row(
+        children: [
+          Expanded(child: buttons[0]),
+          const SizedBox(width: 12),
+          Expanded(child: buttons[1]),
+        ],
+      ),
+    ];
+  } else {
+    dialogActions = buttons;
+  }
+
   dialogManager.show(
     (setState, close, context) => CustomAlertDialog(
       title: null,
       content: SelectionArea(child: msgboxContent(type, title, text)),
-      actions: buttons,
+      actions: dialogActions,
       onSubmit: hasOk ? submit : null,
       onCancel: hasCancel == true ? cancel : null,
     ),
@@ -1316,21 +2140,15 @@ Widget msgboxContent(String type, String title, String text) {
     return text;
   }
 
-  return Row(
+  return Column(
+    crossAxisAlignment: CrossAxisAlignment.start,
+    mainAxisSize: MainAxisSize.min,
     children: [
-      msgboxIcon(type),
-      Expanded(
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              translate(title),
-              style: TextStyle(fontSize: 21),
-            ).marginOnly(bottom: 10),
-            createDialogContent(translateText(text)),
-          ],
-        ),
-      ),
+      Text(
+        translate(title),
+        style: MyTheme.dialogTitleStyle,
+      ).marginOnly(bottom: 16),
+      createDialogContent(translateText(text)),
     ],
   ).marginOnly(bottom: 12);
 }
@@ -1553,6 +2371,66 @@ Future<void> initGlobalFFI() async {
   debugPrint("_globalFFI init end");
   // after `put`, can also be globally found by Get.find<FFI>();
   Get.put<FFI>(_globalFFI, permanent: true);
+
+  // API 서비스 초기화 (CM에서는 스킵 - CM에서 initApiClient가 멈추는 문제)
+  if (desktopType != DesktopType.cm) {
+    await initApiServices();
+  } else {
+    debugPrint('[initGlobalFFI] Skipping initApiServices for CM');
+  }
+}
+
+/// API 서비스 초기화
+/// API 서버 URL을 가져와 ApiClient 및 각 서비스를 초기화합니다.
+Future<void> initApiServices() async {
+  try {
+    // 하드코딩된 API 서버 URL
+    const apiServer = 'https://onedesk.co.kr';
+
+    debugPrint(
+        '[initApiServices] Initializing API services with server: $apiServer');
+
+    // ApiClient 초기화
+    final apiClient = await initApiClient(apiServer);
+
+    // 서비스 초기화
+    initAuthService(apiClient);
+    initSessionService(apiClient);
+    initPaymentService(apiClient);
+
+    // OAuth 서비스 초기화
+    if (isDesktop) {
+      initGoogleAuthService(apiServer);
+      initKakaoAuthService(apiServer);
+      initNaverAuthService(apiServer);
+    } else {
+      initMobileGoogleAuthService(apiServer);
+      initMobileKakaoAuthService(apiServer);
+      initMobileNaverAuthService(apiServer);
+    }
+
+    debugPrint('[initApiServices] API services initialized successfully');
+
+    // 저장된 세션 복원 시도
+    await _tryRestoreSession();
+  } catch (e) {
+    debugPrint('[initApiServices] Failed to initialize API services: $e');
+  }
+}
+
+/// 저장된 세션 복원 시도
+Future<void> _tryRestoreSession() async {
+  try {
+    if (!isAuthServiceInitialized()) return;
+
+    // 쿠키가 있는지 확인하고 세션 복원 시도
+    final restored = await gFFI.userModel.restoreSession();
+    if (restored) {
+      debugPrint('[_tryRestoreSession] Session restored successfully');
+    }
+  } catch (e) {
+    debugPrint('[_tryRestoreSession] Failed to restore session: $e');
+  }
 }
 
 String translate(String name) {
@@ -1623,6 +2501,11 @@ bool mainGetLocalBoolOptionSync(String key) {
   return option2bool(key, bind.mainGetLocalOption(key: key));
 }
 
+/// 파일에서 직접 옵션을 읽음 (캐시 우회, 다른 프로세스에서 변경된 값 읽기용)
+bool mainGetLocalBoolOptionFromFile(String key) {
+  return option2bool(key, bind.mainGetLocalOptionFromFile(key: key));
+}
+
 bool mainGetPeerBoolOptionSync(String id, String key) {
   return option2bool(key, bind.mainGetPeerOptionSync(id: id, key: key));
 }
@@ -1654,7 +2537,7 @@ Future<bool> matchPeer(
 }
 
 /// Get the image for the current [platform].
-Widget getPlatformImage(String platform, {double size = 50}) {
+Widget getPlatformImage(String platform, {double size = 50, Color? color}) {
   if (platform.isEmpty) {
     return Container(width: size, height: size);
   }
@@ -1666,7 +2549,12 @@ Widget getPlatformImage(String platform, {double size = 50}) {
   } else {
     platform = platform.toLowerCase();
   }
-  return SvgPicture.asset('assets/$platform.svg', height: size, width: size);
+  return SvgPicture.asset(
+    'assets/$platform.svg',
+    height: size,
+    width: size,
+    colorFilter: color != null ? svgColor(color) : null,
+  );
 }
 
 class LastWindowPosition {
@@ -1882,25 +2770,35 @@ Future _saveSessionWindowPosition(WindowType windowType, int windowId,
   }
 }
 
-Future<Size> _adjustRestoreMainWindowSize(double? width, double? height) async {
+Future<Size> _adjustRestoreMainWindowSize(double? width, double? height,
+    {WindowType? type}) async {
   const double minWidth = 1;
   const double minHeight = 1;
   const double maxWidth = 6480;
   const double maxHeight = 6480;
 
-  final defaultWidth =
-      ((isDesktop || isWebDesktop) ? 1280 : kMobileDefaultDisplayWidth)
+  // FileTransfer has different default/minimum size
+  final isFileTransfer = type == WindowType.FileTransfer;
+  final defaultWidth = isFileTransfer
+      ? kFileTransferMinWidth
+      : ((isDesktop || isWebDesktop) ? 1280 : kMobileDefaultDisplayWidth)
           .toDouble();
-  final defaultHeight =
-      ((isDesktop || isWebDesktop) ? 720 : kMobileDefaultDisplayHeight)
+  final defaultHeight = isFileTransfer
+      ? kFileTransferMinHeight
+      : ((isDesktop || isWebDesktop) ? 720 : kMobileDefaultDisplayHeight)
           .toDouble();
   double restoreWidth = width ?? defaultWidth;
   double restoreHeight = height ?? defaultHeight;
 
-  if (restoreWidth < minWidth) {
+  // Apply minimum size constraints
+  final effectiveMinWidth = isFileTransfer ? kFileTransferMinWidth : minWidth;
+  final effectiveMinHeight =
+      isFileTransfer ? kFileTransferMinHeight : minHeight;
+
+  if (restoreWidth < effectiveMinWidth) {
     restoreWidth = defaultWidth;
   }
-  if (restoreHeight < minHeight) {
+  if (restoreHeight < effectiveMinHeight) {
     restoreHeight = defaultHeight;
   }
   if (restoreWidth > maxWidth) {
@@ -1983,7 +2881,7 @@ Future<Offset?> _adjustRestoreMainWindowOffset(
 Future<bool> restoreWindowPosition(WindowType type,
     {int? windowId, String? peerId, int? display}) async {
   if (bind
-      .mainGetEnv(key: "DISABLE_RUSTDESK_RESTORE_WINDOW_POSITION")
+      .mainGetEnv(key: "DISABLE_ONEDESK_RESTORE_WINDOW_POSITION")
       .isNotEmpty) {
     return false;
   }
@@ -2049,7 +2947,8 @@ Future<bool> restoreWindowPosition(WindowType type,
     }
   }
 
-  final size = await _adjustRestoreMainWindowSize(lpos.width, lpos.height);
+  final size =
+      await _adjustRestoreMainWindowSize(lpos.width, lpos.height, type: type);
   final offsetLeftTop = await _adjustRestoreMainWindowOffset(
     lpos.offsetWidth,
     lpos.offsetHeight,
@@ -2214,7 +3113,7 @@ bool handleUriLink({List<String>? cmdArgs, Uri? uri, String? uriString}) {
   List<String>? args;
   if (cmdArgs != null && cmdArgs.isNotEmpty) {
     args = cmdArgs;
-    // rustdesk <uri link>
+    // onedesk <uri link>
     if (args[0].startsWith(bind.mainUriPrefixSync())) {
       final uri = Uri.tryParse(args[0]);
       if (uri != null) {
@@ -2301,7 +3200,7 @@ bool handleUriLink({List<String>? cmdArgs, Uri? uri, String? uriString}) {
     switch (type) {
       case UriLinkType.remoteDesktop:
         Future.delayed(Duration.zero, () {
-          rustDeskWinManager.newRemoteDesktop(id!,
+          oneDeskWinManager.newRemoteDesktop(id!,
               password: password,
               switchUuid: switchUuid,
               forceRelay: forceRelay);
@@ -2309,31 +3208,31 @@ bool handleUriLink({List<String>? cmdArgs, Uri? uri, String? uriString}) {
         break;
       case UriLinkType.fileTransfer:
         Future.delayed(Duration.zero, () {
-          rustDeskWinManager.newFileTransfer(id!,
+          oneDeskWinManager.newFileTransfer(id!,
               password: password, forceRelay: forceRelay);
         });
         break;
       case UriLinkType.viewCamera:
         Future.delayed(Duration.zero, () {
-          rustDeskWinManager.newViewCamera(id!,
+          oneDeskWinManager.newViewCamera(id!,
               password: password, forceRelay: forceRelay);
         });
         break;
       case UriLinkType.portForward:
         Future.delayed(Duration.zero, () {
-          rustDeskWinManager.newPortForward(id!, false,
+          oneDeskWinManager.newPortForward(id!, false,
               password: password, forceRelay: forceRelay);
         });
         break;
       case UriLinkType.rdp:
         Future.delayed(Duration.zero, () {
-          rustDeskWinManager.newPortForward(id!, true,
+          oneDeskWinManager.newPortForward(id!, true,
               password: password, forceRelay: forceRelay);
         });
         break;
       case UriLinkType.terminal:
         Future.delayed(Duration.zero, () {
-          rustDeskWinManager.newTerminal(id!,
+          oneDeskWinManager.newTerminal(id!,
               password: password, forceRelay: forceRelay);
         });
         break;
@@ -2384,6 +3283,13 @@ List<String>? urlLinkToCmdArgs(Uri uri) {
         });
       }
     }
+  } else if (uri.authority == "auth") {
+    // Google OAuth 딥링크 처리: onedesk://auth?lt=xxx
+    final lt = uri.queryParameters['lt'];
+    final error = uri.queryParameters['error'];
+    debugPrint('[DeepLink] Auth callback received - lt: $lt, error: $error');
+    googleAuthDeepLinkController.add({'lt': lt, 'error': error});
+    return null;
   } else if (options.contains(uri.authority)) {
     command = '--${uri.authority}';
     if (uri.path.length > 1) {
@@ -2392,9 +3298,9 @@ List<String>? urlLinkToCmdArgs(Uri uri) {
   } else if (uri.authority.length > 2 &&
       (uri.path.length <= 1 ||
           (uri.path == '/r' || uri.path.startsWith('/r@')))) {
-    // rustdesk://<connect-id>
-    // rustdesk://<connect-id>/r
-    // rustdesk://<connect-id>/r@<server>
+    // onedesk://<connect-id>
+    // onedesk://<connect-id>/r
+    // onedesk://<connect-id>/r@<server>
     command = '--connect';
     id = uri.authority;
     if (uri.path.length > 1) {
@@ -2464,31 +3370,31 @@ connectMainDesktop(String id,
     String? connToken,
     bool? isSharedPassword}) async {
   if (isFileTransfer) {
-    await rustDeskWinManager.newFileTransfer(id,
+    await oneDeskWinManager.newFileTransfer(id,
         password: password,
         isSharedPassword: isSharedPassword,
         connToken: connToken,
         forceRelay: forceRelay);
   } else if (isViewCamera) {
-    await rustDeskWinManager.newViewCamera(id,
+    await oneDeskWinManager.newViewCamera(id,
         password: password,
         isSharedPassword: isSharedPassword,
         connToken: connToken,
         forceRelay: forceRelay);
   } else if (isTcpTunneling || isRDP) {
-    await rustDeskWinManager.newPortForward(id, isRDP,
+    await oneDeskWinManager.newPortForward(id, isRDP,
         password: password,
         isSharedPassword: isSharedPassword,
         connToken: connToken,
         forceRelay: forceRelay);
   } else if (isTerminal) {
-    await rustDeskWinManager.newTerminal(id,
+    await oneDeskWinManager.newTerminal(id,
         password: password,
         isSharedPassword: isSharedPassword,
         connToken: connToken,
         forceRelay: forceRelay);
   } else {
-    await rustDeskWinManager.newRemoteDesktop(id,
+    await oneDeskWinManager.newRemoteDesktop(id,
         password: password,
         isSharedPassword: isSharedPassword,
         forceRelay: forceRelay);
@@ -2544,7 +3450,7 @@ connect(BuildContext context, String id,
         forceRelay: forceRelay,
       );
     } else {
-      await rustDeskWinManager.call(WindowType.Main, kWindowConnect, {
+      await oneDeskWinManager.call(WindowType.Main, kWindowConnect, {
         'id': id,
         'isFileTransfer': isFileTransfer,
         'isViewCamera': isViewCamera,
@@ -2717,22 +3623,22 @@ bool isRunningInPortableMode() {
 /// Window status callback
 Future<void> onActiveWindowChanged() async {
   print(
-      "[MultiWindowHandler] active window changed: ${rustDeskWinManager.getActiveWindows()}");
-  if (rustDeskWinManager.getActiveWindows().isEmpty) {
+      "[MultiWindowHandler] active window changed: ${oneDeskWinManager.getActiveWindows()}");
+  if (oneDeskWinManager.getActiveWindows().isEmpty) {
     // close all sub windows
     try {
       if (isLinux) {
         await Future.wait([
           saveWindowPosition(WindowType.Main),
-          rustDeskWinManager.closeAllSubWindows()
+          oneDeskWinManager.closeAllSubWindows()
         ]);
       } else {
-        await rustDeskWinManager.closeAllSubWindows();
+        await oneDeskWinManager.closeAllSubWindows();
       }
     } catch (err) {
       debugPrintStack(label: "$err");
     } finally {
-      debugPrint("Start closing RustDesk...");
+      debugPrint("Start closing OneDesk...");
       await windowManager.setPreventClose(false);
       await windowManager.close();
       if (isMacOS) {
@@ -2748,9 +3654,9 @@ Future<void> onActiveWindowChanged() async {
         //
         //```
         // embedder.cc (2725): 'FlutterPlatformMessageCreateResponseHandle' returned 'kInvalidArguments'. Engine handle was invalid.
-        // 2024-11-11 11:41:11.546 RustDesk[90272:2567686] Failed to create a FlutterPlatformMessageResponseHandle (2)
+        // 2024-11-11 11:41:11.546 OneDesk[90272:2567686] Failed to create a FlutterPlatformMessageResponseHandle (2)
         // embedder.cc (2672): 'FlutterEngineSendPlatformMessage' returned 'kInvalidArguments'. Invalid engine handle.
-        // 2024-11-11 11:41:11.565 RustDesk[90272:2567686] Failed to send message to Flutter engine on channel 'flutter/lifecycle' (2).
+        // 2024-11-11 11:41:11.565 OneDesk[90272:2567686] Failed to send message to Flutter engine on channel 'flutter/lifecycle' (2).
         // ```
         periodic_immediate(
             Duration(milliseconds: 30), RdPlatformChannel.instance.terminate);
@@ -2821,7 +3727,7 @@ class ServerConfig {
     this.key = key?.trim() ?? '';
   }
 
-  /// decode from shared string (from user shared or rustdesk-server generated)
+  /// decode from shared string (from user shared or onedesk-server generated)
   /// also see [encode]
   /// throw when decoding failure
   ServerConfig.decode(String msg) {
@@ -2868,39 +3774,22 @@ Widget dialogButton(String text,
     Widget? icon,
     TextStyle? style,
     ButtonStyle? buttonStyle}) {
-  if (isDesktop || isWebDesktop) {
-    if (isOutline) {
-      return icon == null
-          ? OutlinedButton(
-              onPressed: onPressed,
-              child: Text(translate(text), style: style),
-            )
-          : OutlinedButton.icon(
-              icon: icon,
-              onPressed: onPressed,
-              label: Text(translate(text), style: style),
-            );
-    } else {
-      return icon == null
-          ? ElevatedButton(
-              style: ElevatedButton.styleFrom(elevation: 0).merge(buttonStyle),
-              onPressed: onPressed,
-              child: Text(translate(text), style: style),
-            )
-          : ElevatedButton.icon(
-              icon: icon,
-              style: ElevatedButton.styleFrom(elevation: 0).merge(buttonStyle),
-              onPressed: onPressed,
-              label: Text(translate(text), style: style),
-            );
-    }
+  // 비밀번호 입력 다이얼로그와 동일한 스타일 사용
+  if (isOutline) {
+    return icon == null
+        ? StyledOutlinedButton(
+            label: translate(text),
+            onPressed: onPressed,
+          )
+        : StyledOutlinedButton(
+            icon: icon,
+            label: translate(text),
+            onPressed: onPressed,
+          );
   } else {
-    return TextButton(
+    return StyledPrimaryButton(
+      label: translate(text),
       onPressed: onPressed,
-      child: Text(
-        translate(text),
-        style: style,
-      ),
     );
   }
 }
@@ -2949,7 +3838,7 @@ Future<void> updateSystemWindowTheme() async {
 ///
 /// Note: not found a general solution for rust based AVFoundation bingding.
 /// [AVFoundation] crate has compile error.
-const kMacOSPermChannel = MethodChannel("org.rustdesk.rustdesk/host");
+const kMacOSPermChannel = MethodChannel("org.onedesk.onedesk/host");
 
 enum PermissionAuthorizeType {
   undetermined,
@@ -2984,7 +3873,7 @@ Widget futureBuilder(
           if (snapshot.hasError) {
             debugPrint(snapshot.error.toString());
           }
-          return Container();
+          return const SizedBox.shrink();
         }
       });
 }
@@ -3202,8 +4091,8 @@ Future<List<Rect>> getScreenListWayland() async {
       screenRectList.add(rect);
     }
   } else {
-    final screenList = await rustDeskWinManager.call(
-        WindowType.Main, kWindowGetScreenList, '');
+    final screenList =
+        await oneDeskWinManager.call(WindowType.Main, kWindowGetScreenList, '');
     try {
       for (var screen in jsonDecode(screenList.result) as List<dynamic>) {
         final scale = kIgnoreDpi ? 1.0 : screen['scaleFactor'];
@@ -3536,6 +4425,7 @@ class ComboBox extends StatelessWidget {
     var ref = values[index].obs;
     current = keys[index];
     return Container(
+      height: 48,
       decoration: BoxDecoration(
         border: Border.all(
           color: enabled
@@ -3545,7 +4435,6 @@ class ComboBox extends StatelessWidget {
         borderRadius:
             BorderRadius.circular(8), //border raiuds of dropdown button
       ),
-      height: 42, // should be the height of a TextField
       child: Obx(() => DropdownButton<String>(
             isExpanded: true,
             value: ref.value,
@@ -3558,7 +4447,7 @@ class ComboBox extends StatelessWidget {
             icon: const Icon(
               Icons.expand_more_sharp,
               size: 20,
-            ).marginOnly(right: 15),
+            ).marginOnly(right: 20),
             onChanged: enabled
                 ? (String? newValue) {
                     if (newValue != null && newValue != ref.value) {
@@ -3575,7 +4464,7 @@ class ComboBox extends StatelessWidget {
                   value,
                   style: const TextStyle(fontSize: 15),
                   overflow: TextOverflow.ellipsis,
-                ).marginOnly(left: 15),
+                ).marginOnly(left: 20),
               );
             }).toList(),
           )),

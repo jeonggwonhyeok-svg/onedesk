@@ -71,6 +71,9 @@ class ChatModel with ChangeNotifier {
   RxInt mobileUnreadSum = 0.obs;
   MessageKey? latestReceivedKey;
 
+  // CM에서 채팅 화면 표시 여부 (메시지 도착 시 true로 설정)
+  RxBool cmShowChatView = false.obs;
+
   Offset chatWindowPosition = Offset(20, 80);
 
   void setChatWindowPosition(Offset position) {
@@ -413,6 +416,10 @@ class ChatModel with ChangeNotifier {
       }
       if (isDesktop) {
         windowOnTop(null);
+        // CM에서 메시지 도착 시 채팅 화면으로 자동 전환
+        if (isConnManager) {
+          cmShowChatView.value = true;
+        }
         // disable auto jumpTo other tab when hasFocus, and mark unread message
         final currentSelectedTab =
             session.serverModel.tabController.state.value.selectedTabInfo;

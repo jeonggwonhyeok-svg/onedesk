@@ -18,6 +18,9 @@ enum WindowType {
   ViewCamera,
   PortForward,
   Terminal,
+  PlanSelection,
+  VoiceCallDialog,
+  CameraRequestDialog,
   Unknown
 }
 
@@ -36,6 +39,12 @@ extension Index on int {
         return WindowType.PortForward;
       case 5:
         return WindowType.Terminal;
+      case 6:
+        return WindowType.PlanSelection;
+      case 7:
+        return WindowType.VoiceCallDialog;
+      case 8:
+        return WindowType.CameraRequestDialog;
       default:
         return WindowType.Unknown;
     }
@@ -52,10 +61,10 @@ class MultiWindowCallResult {
 /// Window Manager
 /// mainly use it in `Main Window`
 /// use it in sub window is not recommended
-class RustDeskMultiWindowManager {
-  RustDeskMultiWindowManager._();
+class OneDeskMultiWindowManager {
+  OneDeskMultiWindowManager._();
 
-  static final instance = RustDeskMultiWindowManager._();
+  static final instance = OneDeskMultiWindowManager._();
 
   final Set<int> _inactiveWindows = {};
   final Set<int> _activeWindows = {};
@@ -157,9 +166,13 @@ class RustDeskMultiWindowManager {
     }
     final windowId = windowController.windowId;
     if (!withScreenRect) {
+      // FileTransfer uses larger default size
+      final defaultSize = type == WindowType.FileTransfer
+          ? Size(kFileTransferMinWidth + windowId * 20,
+              kFileTransferMinHeight + windowId * 20)
+          : Size(1280 + windowId * 20, 720 + windowId * 20);
       windowController
-        ..setFrame(const Offset(0, 0) &
-            Size(1280 + windowId * 20, 720 + windowId * 20))
+        ..setFrame(const Offset(0, 0) & defaultSize)
         ..center()
         ..setTitle(getWindowNameWithId(
           remoteId,
@@ -383,6 +396,77 @@ class RustDeskMultiWindowManager {
     return MultiWindowCallResult(windowId, null);
   }
 
+  /// 플랜 선택 창 열기
+  Future<void> newPlanSelection() async {
+    var params = {
+      "type": WindowType.PlanSelection.index,
+    };
+    final msg = jsonEncode(params);
+
+    final windowController = await DesktopMultiWindow.createWindow(msg);
+    final windowId = windowController.windowId;
+    windowController
+      ..setFrame(const Offset(0, 0) & const Size(700, 600))
+      ..center()
+      ..setTitle(translate('Plan Selection'));
+    if (isMacOS) {
+      Future.microtask(() => windowController.show());
+    }
+    registerActiveWindow(windowId);
+  }
+
+  /// 음성 채팅 요청 다이얼로그 창 열기
+  Future<void> newVoiceCallDialog({
+    required int clientId,
+    required String clientName,
+    required String clientPeerId,
+  }) async {
+    var params = {
+      "type": WindowType.VoiceCallDialog.index,
+      "client_id": clientId,
+      "client_name": clientName,
+      "client_peer_id": clientPeerId,
+    };
+    final msg = jsonEncode(params);
+
+    final windowController = await DesktopMultiWindow.createWindow(msg);
+    final windowId = windowController.windowId;
+    windowController
+      ..setFrame(const Offset(0, 0) & const Size(400, 420))
+      ..center()
+      ..setTitle(translate('Voice Chat Request'));
+    // 항상 위에 표시하고 포커스
+    windowController.show();
+    windowController.focus();
+    registerActiveWindow(windowId);
+  }
+
+  /// 카메라 공유 요청 다이얼로그 창 열기
+  Future<void> newCameraRequestDialog({
+    required int clientId,
+    required String clientName,
+    required String clientPeerId,
+  }) async {
+    var params = {
+      "type": WindowType.CameraRequestDialog.index,
+      "client_id": clientId,
+      "client_name": clientName,
+      "client_peer_id": clientPeerId,
+    };
+    final msg = jsonEncode(params);
+
+    final windowController = await DesktopMultiWindow.createWindow(msg);
+    final windowId = windowController.windowId;
+    windowController
+      ..setFrame(const Offset(0, 0) & const Size(400, 360))
+      ..center()
+      ..setTitle(translate('Camera Share Request'));
+    // 항상 위에 표시하고 포커스
+    windowController.show();
+    windowController.focus();
+    registerActiveWindow(windowId);
+  }
+
   Future<MultiWindowCallResult> call(
       WindowType type, String methodName, dynamic args) async {
     final wnds = _findWindowsByType(type);
@@ -415,6 +499,9 @@ class RustDeskMultiWindowManager {
         return _portForwardWindows;
       case WindowType.Terminal:
         return _terminalWindows;
+      case WindowType.PlanSelection:
+      case WindowType.VoiceCallDialog:
+      case WindowType.CameraRequestDialog:
       case WindowType.Unknown:
         break;
     }
@@ -439,6 +526,10 @@ class RustDeskMultiWindowManager {
         break;
       case WindowType.Terminal:
         _terminalWindows.clear();
+        break;
+      case WindowType.PlanSelection:
+      case WindowType.VoiceCallDialog:
+      case WindowType.CameraRequestDialog:
       case WindowType.Unknown:
         break;
     }
@@ -450,47 +541,32 @@ class RustDeskMultiWindowManager {
   }
 
   Future<void> closeAllSubWindows() async {
-    await Future.wait(WindowType.values.map((e) => _closeWindows(e)));
-  }
-
-  Future<void> _closeWindows(WindowType type) async {
-    if (type == WindowType.Main) {
-      // skip main window, use window manager instead
-      return;
-    }
-
-    List<int> windows = [];
+    // 모든 서브 창에 onDestroy 메시지를 보내서 탭을 정리하고 연결을 끊음
     try {
-      windows = _findWindowsByType(type);
-    } catch (e) {
-      debugPrint('Failed to getAllSubWindowIds of $type, $e');
-      return;
-    }
-
-    if (windows.isEmpty) {
-      return;
-    }
-    for (int i = 0; i < windows.length; i++) {
-      final wId = windows[i];
-      final shouldSavePos = type != WindowType.Terminal || i == windows.length - 1;
-      if (shouldSavePos) {
-        debugPrint("closing multi window, type: ${type.toString()} id: $wId");
+      final allWindows = await getAllSubWindowIds();
+      for (final wId in allWindows) {
         try {
-          await saveWindowPosition(type, windowId: wId);
+          // 먼저 onDestroy를 보내서 탭 정리 및 FFI 세션 종료
+          await DesktopMultiWindow.invokeMethod(wId, "onDestroy", "");
+          // 잠시 대기하여 dispose가 완료되도록 함
+          await Future.delayed(const Duration(milliseconds: 100));
+          // 창 닫기
+          await WindowController.fromWindowId(wId).setPreventClose(false);
+          await WindowController.fromWindowId(wId).close();
         } catch (e) {
-          debugPrint('Failed to save window position of $wId, $e');
+          debugPrint("Failed to close window $wId: $e");
         }
       }
-      try {
-        await WindowController.fromWindowId(wId).setPreventClose(false);
-        await WindowController.fromWindowId(wId).close();
-        _activeWindows.remove(wId);
-      } catch (e) {
-        debugPrint("$e");
-        return;
-      }
+    } catch (e) {
+      debugPrint("Failed to get all sub window ids: $e");
     }
-    clearWindowType(type);
+
+    // 내부 추적 목록 정리
+    _remoteDesktopWindows.clear();
+    _fileTransferWindows.clear();
+    _viewCameraWindows.clear();
+    _portForwardWindows.clear();
+    _terminalWindows.clear();
   }
 
   Future<List<int>> getAllSubWindowIds() async {
@@ -527,7 +603,7 @@ class RustDeskMultiWindowManager {
   /// [Availability]
   /// This function should only be called from main window.
   /// For other windows, please post a unregister(hide) event to main window handler:
-  /// `rustDeskWinManager.call(WindowType.Main, kWindowEventHide, {"id": windowId!});`
+  /// `oneDeskWinManager.call(WindowType.Main, kWindowEventHide, {"id": windowId!});`
   Future<void> unregisterActiveWindow(int windowId) async {
     _activeWindows.remove(windowId);
     if (windowId != kMainWindowId) {
@@ -578,4 +654,4 @@ class RustDeskMultiWindowManager {
   }
 }
 
-final rustDeskWinManager = RustDeskMultiWindowManager.instance;
+final oneDeskWinManager = OneDeskMultiWindowManager.instance;

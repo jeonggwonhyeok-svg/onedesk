@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:collection';
+import 'dart:io';
 
 import 'package:dynamic_layouts/dynamic_layouts.dart';
 import 'package:flutter/foundation.dart';
@@ -54,10 +55,16 @@ class PeersModelName {
 /// for peer search text, global obs value
 final peerSearchText = "".obs;
 
+/// for peer search expanded state
+final peerSearchExpanded = false.obs;
+
 /// for peer sort, global obs value
 RxString? _peerSort;
 RxString get peerSort {
-  _peerSort ??= bind.getLocalFlutterOption(k: kOptionPeerSorting).obs;
+  if (_peerSort == null) {
+    final saved = bind.getLocalFlutterOption(k: kOptionPeerSorting);
+    _peerSort = (saved.isEmpty ? PeerSortType.remoteHost : saved).obs;
+  }
   return _peerSort!;
 }
 
@@ -191,11 +198,6 @@ class _PeersViewState extends State<_PeersView>
             child: Column(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                Icon(
-                  Icons.sentiment_very_dissatisfied_rounded,
-                  color: Theme.of(context).tabBarTheme.labelColor,
-                  size: 40,
-                ).paddingOnly(bottom: 10),
                 Text(
                   translate(
                     _emptyMessages[widget.peers.loadEvent] ?? 'Empty',
@@ -251,18 +253,22 @@ class _PeersViewState extends State<_PeersView>
               // and the peers change event will trigger _buildPeersView().
               return !isPortrait
                   ? Obx(() => peerCardUiType.value == PeerUiType.list
-                      ? Container(height: 45, child: visibilityChild)
+                      ? Container(height: 80, child: visibilityChild)
                       : peerCardUiType.value == PeerUiType.grid
                           ? SizedBox(
-                              width: 220, height: 140, child: visibilityChild)
+                              width: 300, height: 220, child: visibilityChild)
                           : SizedBox(
-                              width: 220, height: 42, child: visibilityChild))
+                              width: 300, height: 80, child: visibilityChild))
                   : Container(child: visibilityChild);
             }
 
             // We should avoid too many rebuilds. Win10(Some machines) on Flutter 3.19.6.
             // Continious rebuilds of `ListView.builder` will cause memory leak.
             // Simple demo can reproduce this issue.
+            const double minCardWidth = 296;
+            const double cardPaddingLeft = 16;
+            const double cardPaddingRight = 16;
+
             final Widget child = Obx(() => stateGlobal.isPortrait.isTrue
                 ? ListView.builder(
                     itemCount: peers.length,
@@ -272,24 +278,55 @@ class _PeersViewState extends State<_PeersView>
                     },
                   )
                 : peerCardUiType.value == PeerUiType.list
-                    ? ListView.builder(
-                        controller: _scrollController,
-                        itemCount: peers.length,
-                        itemBuilder: (BuildContext context, int index) {
-                          return buildOnePeer(peers[index], false).marginOnly(
-                              right: space,
-                              top: index == 0 ? 0 : space / 2,
-                              bottom: space / 2);
-                        },
+                    ? Padding(
+                        padding: const EdgeInsets.only(left: cardPaddingLeft, right: cardPaddingRight),
+                        child: ListView.builder(
+                          controller: _scrollController,
+                          itemCount: peers.length,
+                          itemBuilder: (BuildContext context, int index) {
+                            return buildOnePeer(peers[index], false).marginOnly(
+                                top: index == 0 ? 0 : space / 2,
+                                bottom: space / 2);
+                          },
+                        ),
                       )
-                    : DynamicGridView.builder(
-                        gridDelegate: SliverGridDelegateWithWrapping(
-                            mainAxisSpacing: space / 2,
-                            crossAxisSpacing: space),
-                        itemCount: peers.length,
-                        itemBuilder: (BuildContext context, int index) {
-                          return buildOnePeer(peers[index], false);
-                        }));
+                    : LayoutBuilder(
+                        builder: (context, constraints) {
+                          // 사용 가능한 너비에서 패딩 제외
+                          final availableWidth = constraints.maxWidth - cardPaddingLeft - cardPaddingRight;
+                          // 최소 카드 너비 기준으로 열 개수 계산
+                          // n개 카드 = n * minCardWidth + (n-1) * space
+                          // 수식 변환: n <= (availableWidth + space) / (minCardWidth + space)
+                          int crossAxisCount = ((availableWidth + space) / (minCardWidth + space)).floor();
+                          File('C:/Project/onedesk/debug_layout.txt').writeAsStringSync(
+                            'maxWidth: ${constraints.maxWidth}\navailableWidth: $availableWidth\ncrossAxisCount: $crossAxisCount\nspace: $space\nminCardWidth: $minCardWidth\ncalc: ${(availableWidth + space) / (minCardWidth + space)}');
+
+                          if (crossAxisCount < 1) crossAxisCount = 1;
+                          // 카드 높이 결정 (grid: 220, tile: 80)
+                          final cardHeight = peerCardUiType.value == PeerUiType.grid ? 220.0 : 80.0;
+                          // 실제 카드 너비 계산
+                          final cardWidth = (availableWidth - (space * (crossAxisCount - 1))) / crossAxisCount;
+                          final aspectRatio = cardWidth / cardHeight;
+
+                          return Padding(
+                            padding: const EdgeInsets.only(left: cardPaddingLeft, right: cardPaddingRight),
+                            child: GridView.builder(
+                              controller: _scrollController,
+                              padding: EdgeInsets.only(bottom: space),
+                              gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                                crossAxisCount: crossAxisCount,
+                                mainAxisSpacing: space,
+                                crossAxisSpacing: space,
+                                childAspectRatio: aspectRatio,
+                              ),
+                              itemCount: peers.length,
+                              itemBuilder: (BuildContext context, int index) {
+                                return buildOnePeer(peers[index], false);
+                              },
+                            ),
+                          );
+                        },
+                      ));
 
             if (updateEvent == UpdateEvent.load) {
               _curPeers.clear();

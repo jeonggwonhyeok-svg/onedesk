@@ -727,6 +727,8 @@ pub fn discover() {
 }
 
 #[cfg(feature = "flutter")]
+/// 피어 설정 정보를 Flutter로 전달하기 위한 HashMap으로 변환합니다.
+/// Converts peer config to HashMap for Flutter communication.
 pub fn peer_to_map(id: String, p: PeerConfig) -> HashMap<&'static str, String> {
     use hbb_common::sodiumoxide::base64;
     HashMap::<&str, String>::from_iter([
@@ -734,6 +736,9 @@ pub fn peer_to_map(id: String, p: PeerConfig) -> HashMap<&'static str, String> {
         ("username", p.info.username.clone()),
         ("hostname", p.info.hostname.clone()),
         ("platform", p.info.platform.clone()),
+        // OS 버전 정보 추가 (예: "Windows 10", "Windows 11")
+        // Added OS version info for display in peer card
+        ("os_version", p.info.os_version.clone()),
         (
             "alias",
             p.options.get("alias").unwrap_or(&"".to_owned()).to_owned(),
@@ -869,28 +874,28 @@ pub fn video_save_directory(root: bool) -> String {
         }
     };
 
-    if root {
-        // Currently, only installed windows run as root
-        #[cfg(windows)]
-        {
-            let drive = std::env::var("SystemDrive").unwrap_or("C:".to_owned());
-            let dir =
-                std::path::PathBuf::from(format!("{drive}\\ProgramData\\{appname}\\recording",));
-            return dir.to_string_lossy().to_string();
-        }
-    }
-    // Get directory from config file otherwise --server will use the old value from global var.
+    // root=true means incoming, root=false means outgoing
+    let option_key = if root {
+        OPTION_VIDEO_SAVE_DIRECTORY_INCOMING
+    } else {
+        OPTION_VIDEO_SAVE_DIRECTORY_OUTGOING
+    };
+
+    // Subfolder name for incoming/outgoing
+    let subfolder = if root { "Incoming" } else { "Outgoing" };
+
+    // Get directory from config file
     #[cfg(any(target_os = "linux", target_os = "macos"))]
-    let dir = LocalConfig::get_option_from_file(OPTION_VIDEO_SAVE_DIRECTORY);
+    let dir = LocalConfig::get_option_from_file(option_key);
     #[cfg(not(any(target_os = "linux", target_os = "macos")))]
-    let dir = LocalConfig::get_option(OPTION_VIDEO_SAVE_DIRECTORY);
+    let dir = LocalConfig::get_option(option_key);
     if !dir.is_empty() {
         return dir;
     }
     #[cfg(any(target_os = "android", target_os = "ios"))]
     if let Ok(home) = config::APP_HOME_DIR.read() {
         let mut path = home.to_owned();
-        path.push_str(format!("/{appname}/ScreenRecord").as_str());
+        path.push_str(format!("/{appname}/ScreenRecord/{subfolder}").as_str());
         let dir = try_create(&std::path::Path::new(&path));
         if !dir.is_empty() {
             return dir;
@@ -899,7 +904,7 @@ pub fn video_save_directory(root: bool) -> String {
 
     if let Some(user) = directories_next::UserDirs::new() {
         if let Some(video_dir) = user.video_dir() {
-            let dir = try_create(&video_dir.join(&appname));
+            let dir = try_create(&video_dir.join(&appname).join(subfolder));
             if !dir.is_empty() {
                 return dir;
             }
@@ -927,7 +932,7 @@ pub fn video_save_directory(root: bool) -> String {
             "Videos"
         };
         let video_dir = home.join(name);
-        let dir = try_create(&video_dir.join(&appname));
+        let dir = try_create(&video_dir.join(&appname).join(subfolder));
         if !dir.is_empty() {
             return dir;
         }
@@ -950,6 +955,94 @@ pub fn video_save_directory(root: bool) -> String {
                 return dir;
             }
             // basically exist
+            return parent.to_string_lossy().to_string();
+        }
+    }
+    Default::default()
+}
+
+#[inline]
+pub fn screenshot_save_directory() -> String {
+    let appname = crate::get_app_name();
+    let try_create = |path: &std::path::Path| {
+        if !path.exists() {
+            std::fs::create_dir_all(path).ok();
+        }
+        if path.exists() {
+            path.to_string_lossy().to_string()
+        } else {
+            "".to_string()
+        }
+    };
+
+    // Get directory from config file
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    let dir = LocalConfig::get_option_from_file(OPTION_SCREENSHOT_SAVE_DIRECTORY);
+    #[cfg(not(any(target_os = "linux", target_os = "macos")))]
+    let dir = LocalConfig::get_option(OPTION_SCREENSHOT_SAVE_DIRECTORY);
+    if !dir.is_empty() {
+        return dir;
+    }
+
+    // Android/iOS: use APP_HOME_DIR
+    #[cfg(any(target_os = "android", target_os = "ios"))]
+    if let Ok(home) = config::APP_HOME_DIR.read() {
+        let mut path = home.to_owned();
+        path.push_str(format!("/{appname}/Screenshot").as_str());
+        let dir = try_create(&std::path::Path::new(&path));
+        if !dir.is_empty() {
+            return dir;
+        }
+    }
+
+    // Default to Pictures folder
+    if let Some(user) = directories_next::UserDirs::new() {
+        if let Some(picture_dir) = user.picture_dir() {
+            let dir = try_create(&picture_dir.join(&appname));
+            if !dir.is_empty() {
+                return dir;
+            }
+            if picture_dir.exists() {
+                return picture_dir.to_string_lossy().to_string();
+            }
+        }
+        if let Some(desktop_dir) = user.desktop_dir() {
+            if desktop_dir.exists() {
+                return desktop_dir.to_string_lossy().to_string();
+            }
+        }
+        let home = user.home_dir();
+        if home.exists() {
+            return home.to_string_lossy().to_string();
+        }
+    }
+
+    // Fallback for other platforms
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    if let Some(home) = crate::platform::get_active_user_home() {
+        let picture_dir = home.join("Pictures");
+        let dir = try_create(&picture_dir.join(&appname));
+        if !dir.is_empty() {
+            return dir;
+        }
+        if picture_dir.exists() {
+            return picture_dir.to_string_lossy().to_string();
+        }
+        let desktop_dir = home.join("Desktop");
+        if desktop_dir.exists() {
+            return desktop_dir.to_string_lossy().to_string();
+        }
+        if home.exists() {
+            return home.to_string_lossy().to_string();
+        }
+    }
+
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(parent) = exe.parent() {
+            let dir = try_create(&parent.join("screenshots"));
+            if !dir.is_empty() {
+                return dir;
+            }
             return parent.to_string_lossy().to_string();
         }
     }
@@ -1172,7 +1265,7 @@ async fn check_connect_status_(reconnect: bool, rx: mpsc::UnboundedReceiver<ipc:
 
     loop {
         if let Ok(mut c) = ipc::connect(1000, "").await {
-            let mut timer = crate::rustdesk_interval(time::interval(time::Duration::from_secs(1)));
+            let mut timer = crate::onedesk_interval(time::interval(time::Duration::from_secs(1)));
             loop {
                 tokio::select! {
                     res = c.next() => {

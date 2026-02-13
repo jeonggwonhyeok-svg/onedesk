@@ -40,7 +40,7 @@ static mut LATEST_SEED: i32 = 0;
 
 // Using a fixed temporary directory for updates is preferable to
 // using one that includes the custom client name.
-const UPDATE_TEMP_DIR: &str = "/tmp/.rustdeskupdate";
+const UPDATE_TEMP_DIR: &str = "/tmp/.onedeskupdate";
 
 extern "C" {
     fn CGSCurrentCursorSeed() -> i32;
@@ -100,7 +100,7 @@ pub fn is_can_screen_recording(prompt: bool) -> bool {
 
 // macOS >= 10.15
 // https://stackoverflow.com/questions/56597221/detecting-screen-recording-settings-on-macos-catalina/
-// remove just one app from all the permissions: tccutil reset All com.carriez.rustdesk
+// remove just one app from all the permissions: tccutil reset All com.carriez.onedesk
 fn unsafe_is_can_screen_recording(prompt: bool) -> bool {
     // we got some report that we show no permission even after set it, so we try to use new api for screen recording check
     // the new api is only available on macOS >= 10.15, but on stackoverflow, some people said it works on >= 10.16 (crash on 10.15),
@@ -299,10 +299,10 @@ fn update_daemon_agent(agent_plist_file: String, update_source_dir: String, sync
 fn correct_app_name(s: &str) -> String {
     let mut s = s.to_owned();
     if let Some(bundleid) = get_bundle_id() {
-        s = s.replace("com.carriez.rustdesk", &bundleid);
+        s = s.replace("com.carriez.onedesk", &bundleid);
     }
-    s = s.replace("rustdesk", &crate::get_app_name().to_lowercase());
-    s = s.replace("RustDesk", &crate::get_app_name());
+    s = s.replace("onedesk", &crate::get_app_name().to_lowercase());
+    s = s.replace("OneDesk", &crate::get_app_name());
     s
 }
 
@@ -636,8 +636,8 @@ pub fn start_os_service() {
     /* // mouse/keyboard works in prelogin now with launchctl asuser.
        // below can avoid multi-users logged in problem, but having its own below problem.
        // Not find a good way to start --cm without root privilege (affect file transfer).
-       // one way is to start with `launchctl asuser <uid> open -n -a /Applications/RustDesk.app/ --args --cm`,
-       // this way --cm is started with the user privilege, but we will have problem to start another RustDesk.app
+       // one way is to start with `launchctl asuser <uid> open -n -a /Applications/OneDesk.app/ --args --cm`,
+       // this way --cm is started with the user privilege, but we will have problem to start another OneDesk.app
        // with open in explorer.
         use std::sync::{
             atomic::{AtomicBool, Ordering},
@@ -733,7 +733,7 @@ pub fn update_me() -> ResultType<()> {
     );
 
     let cmd = std::env::current_exe()?;
-    // RustDesk.app/Contents/MacOS/RustDesk
+    // OneDesk.app/Contents/MacOS/OneDesk
     let app_dir = cmd
         .parent()
         .and_then(|p| p.parent())
@@ -824,7 +824,7 @@ pub fn extract_update_dmg(file: &str) {
 }
 
 fn extract_dmg(dmg_path: &str, target_dir: &str) -> ResultType<()> {
-    let mount_point = "/Volumes/RustDeskUpdate";
+    let mount_point = "/Volumes/OneDeskUpdate";
     let target_path = Path::new(target_dir);
 
     if target_path.exists() {

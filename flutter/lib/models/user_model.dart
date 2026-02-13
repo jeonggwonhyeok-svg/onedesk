@@ -4,6 +4,10 @@ import 'dart:convert';
 import 'package:bot_toast/bot_toast.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_hbb/common/hbbs/hbbs.dart';
+import 'package:flutter_hbb/common/api/models.dart' as api_models;
+import 'package:flutter_hbb/common/api/auth_service.dart';
+import 'package:flutter_hbb/common/api/session_service.dart';
+import 'package:flutter_hbb/common/api/cookie_manager.dart';
 import 'package:flutter_hbb/models/ab_model.dart';
 import 'package:get/get.dart';
 
@@ -16,10 +20,20 @@ bool refreshingUser = false;
 
 class UserModel {
   final RxString userName = ''.obs;
+  final RxString userEmail = ''.obs;
+  final RxInt userType = 1.obs; // 0=FREE, 1=SOLO, 2=PRO, 3=TEAM, 4=BUSINESS
+  final RxInt loginType = 0.obs; // 0=email, 1=google
+  final RxString deviceKey = ''.obs;
+  final RxString sessionKey = ''.obs;
   final RxBool isAdmin = false.obs;
   final RxString networkError = ''.obs;
-  bool get isLogin => userName.isNotEmpty;
+  final RxString planType = 'FREE'.obs; // 반응형 플랜 타입 (FREE, SOLO, PRO, TEAM, BUSINESS)
+  final RxInt connectionCount = 1.obs; // 동시 접속 가능 수
+  bool get isLogin => userName.isNotEmpty || userEmail.isNotEmpty;
   WeakReference<FFI> parent;
+
+  /// 현재 사용자 정보
+  api_models.UserInfo? currentUserInfo;
 
   UserModel(this.parent) {
     userName.listen((p0) {
@@ -109,7 +123,20 @@ class UserModel {
       await gFFI.abModel.reset();
       await gFFI.groupModel.reset();
     }
+
+    // 새 API 시스템 관련 정리
     userName.value = '';
+    userEmail.value = '';
+    userType.value = 1;
+    loginType.value = 0;
+    deviceKey.value = '';
+    sessionKey.value = '';
+    planType.value = 'FREE';
+    connectionCount.value = 1;
+    currentUserInfo = null;
+
+    // 쿠키 정리
+    await cookieManager.clearAllCookies();
   }
 
   _parseAndUpdateUser(UserPayload user) {
@@ -123,16 +150,33 @@ class UserModel {
   }
 
   // update ab and group status
+  // 기존 RustDesk API 비활성화 - 새 API 시스템 사용
   static Future<void> updateOtherModels() async {
-    await Future.wait([
-      gFFI.abModel.pullAb(force: ForcePullAb.listAndCurrent, quiet: false),
-      gFFI.groupModel.pull()
-    ]);
+    // TODO: 새 API 시스템으로 주소록/그룹 기능 구현 시 활성화
+    // await Future.wait([
+    //   gFFI.abModel.pullAb(force: ForcePullAb.listAndCurrent, quiet: false),
+    //   gFFI.groupModel.pull()
+    // ]);
   }
 
   Future<void> logOut({String? apiServer}) async {
-    final tag = gFFI.dialogManager.showLoading(translate('Waiting'));
+    final tag = gFFI.dialogManager.showLoading(translate('Logging out...'));
     try {
+      // 새 API 시스템을 사용하여 로그아웃 시도
+      if (isAuthServiceInitialized()) {
+        try {
+          // 세션 종료
+          if (isSessionServiceInitialized() && sessionKey.value.isNotEmpty) {
+            await getSessionService().endSession(sessionKey.value);
+          }
+          // 로그아웃 API 호출
+          await getAuthService().logout();
+        } catch (e) {
+          debugPrint("New API logout failed: $e");
+        }
+      }
+
+      // 기존 API 시스템 로그아웃 (백워드 호환성)
       final url = apiServer ?? await bind.mainGetApiServer();
       final authHeaders = getHttpHeaders();
       authHeaders['Content-Type'] = "application/json";
@@ -149,6 +193,66 @@ class UserModel {
     } finally {
       await reset(resetOther: true);
       gFFI.dialogManager.dismissByTag(tag);
+    }
+  }
+
+  /// 새 API 시스템용 로그인 (UserInfo 사용)
+  void loginWithUserInfo(api_models.UserInfo userInfo) {
+    currentUserInfo = userInfo;
+    userName.value = userInfo.nick ?? userInfo.email;
+    userEmail.value = userInfo.email;
+    userType.value = userInfo.type;
+    loginType.value = userInfo.loginType;
+    deviceKey.value = userInfo.deviceKey ?? '';
+    sessionKey.value = userInfo.sessionKey ?? '';
+    planType.value = userInfo.planType ?? 'FREE'; // 반응형 플랜 타입 업데이트
+    connectionCount.value = userInfo.connectionCount; // 동시 접속 가능 수 업데이트
+
+    // 로컬 옵션에 사용자 정보 저장
+    bind.mainSetLocalOption(
+      key: 'user_info',
+      value: jsonEncode(userInfo.toJson()),
+    );
+
+    debugPrint('User logged in: ${userInfo.email}, planType=${userInfo.planType}, connectionCount=${userInfo.connectionCount}');
+  }
+
+  /// 저장된 사용자 정보로 세션 복원
+  Future<bool> restoreSession() async {
+    try {
+      if (!isAuthServiceInitialized()) return false;
+
+      final authService = getAuthService();
+      final meRes = await authService.me();
+
+      if (!meRes.success || meRes.data == null) {
+        return false;
+      }
+
+      final userInfo = api_models.UserInfo.fromJson(meRes.data!);
+
+      // 세션 등록 및 활성화
+      if (isSessionServiceInitialized()) {
+        final sessionService = getSessionService();
+        final deviceId = await bind.mainGetMyId();
+        final version = await bind.mainGetVersion();
+
+        final registerRes = await sessionService.registerSession(deviceId, version);
+        if (registerRes.success) {
+          userInfo.deviceKey = registerRes.extract('deviceKey');
+
+          final activateRes = await sessionService.activateSession(userInfo.deviceKey ?? '');
+          if (activateRes.success) {
+            userInfo.sessionKey = activateRes.extract('sessionKey');
+          }
+        }
+      }
+
+      loginWithUserInfo(userInfo);
+      return true;
+    } catch (e) {
+      debugPrint('Failed to restore session: $e');
+      return false;
     }
   }
 

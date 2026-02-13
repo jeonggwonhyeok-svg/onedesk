@@ -21,8 +21,8 @@ const String kPlatformAdditionsIsWayland = "is_wayland";
 const String kPlatformAdditionsHeadless = "headless";
 const String kPlatformAdditionsIsInstalled = "is_installed";
 const String kPlatformAdditionsIddImpl = "idd_impl";
-const String kPlatformAdditionsRustDeskVirtualDisplays =
-    "rustdesk_virtual_displays";
+const String kPlatformAdditionsOneDeskVirtualDisplays =
+    "onedesk_virtual_displays";
 const String kPlatformAdditionsAmyuniVirtualDisplays =
     "amyuni_virtual_displays";
 const String kPlatformAdditionsHasFileClipboard = "has_file_clipboard";
@@ -48,6 +48,9 @@ const String kAppTypeDesktopFileTransfer = "file transfer";
 const String kAppTypeDesktopViewCamera = "view camera";
 const String kAppTypeDesktopPortForward = "port forward";
 const String kAppTypeDesktopTerminal = "terminal";
+const String kAppTypeDesktopPlanSelection = "plan selection";
+const String kAppTypeDesktopVoiceCallDialog = "voice call dialog";
+const String kAppTypeDesktopCameraRequestDialog = "camera request dialog";
 
 const String kWindowMainWindowOnTop = "main_window_on_top";
 const String kWindowGetWindowInfo = "get_window_info";
@@ -76,6 +79,9 @@ const String kWindowEventSetFullscreen = "set_fullscreen";
 const String kWindowEventMoveTabToNewWindow = "move_tab_to_new_window";
 const String kWindowEventGetCachedSessionData = "get_cached_session_data";
 const String kWindowEventOpenMonitorSession = "open_monitor_session";
+const String kWindowEventShowVoiceCallDialog = "show_voice_call_dialog";
+const String kWindowEventOpenSettings = "open_settings";
+const String kWindowEventForceClose = "force_close";
 
 const String kOptionViewStyle = "view_style";
 const String kOptionScrollStyle = "scroll_style";
@@ -100,6 +106,9 @@ const String kOptionEnableHwcodec = "enable-hwcodec";
 const String kOptionAllowAutoRecordIncoming = "allow-auto-record-incoming";
 const String kOptionAllowAutoRecordOutgoing = "allow-auto-record-outgoing";
 const String kOptionVideoSaveDirectory = "video-save-directory";
+const String kOptionVideoSaveDirectoryIncoming = "video-save-directory-incoming";
+const String kOptionVideoSaveDirectoryOutgoing = "video-save-directory-outgoing";
+const String kOptionScreenshotSaveDirectory = "screenshot-save-directory";
 const String kOptionAccessMode = "access-mode";
 const String kOptionEnableKeyboard = "enable-keyboard";
 // "Settings -> Security -> Permissions"
@@ -193,6 +202,8 @@ const String kUrlActionClose = "close";
 
 const String kTabLabelHomePage = "Home";
 const String kTabLabelSettingPage = "Settings";
+const String kTabLabelMyPage = "My Page"; // 마이페이지 탭
+const String kTabLabelAccessList = "Access List"; // 액세스 리스트 탭
 
 const String kWindowPrefix = "wm_";
 const int kWindowMainId = 0;
@@ -219,7 +230,7 @@ const String kKeyReverseMouseWheel = "reverse_mouse_wheel";
 const String kMsgboxTextWaitingForImage = 'Connected, waiting for image...';
 
 // the executable name of the portable version
-const String kEnvPortableExecutable = "RUSTDESK_APPNAME";
+const String kEnvPortableExecutable = "ONEDESK_APPNAME";
 
 const Color kColorWarn = Color.fromARGB(255, 245, 133, 59);
 const Color kColorCanvas = Colors.black;
@@ -232,6 +243,14 @@ const int kDesktopDefaultDisplayHeight = 720;
 
 const int kMobileMaxDisplaySize = 1280;
 const int kDesktopMaxDisplaySize = 3840;
+
+// Minimum window size for main/login windows (그림자 보정 +16px 포함)
+const double kMainWindowMinWidth = 896;
+const double kMainWindowMinHeight = 816;
+
+// Minimum window size for file transfer window
+const double kFileTransferMinWidth = 1100;
+const double kFileTransferMinHeight = 600;
 
 const double kDesktopFileTransferRowHeight = 30.0;
 const double kDesktopFileTransferHeaderHeight = 25.0;
@@ -280,8 +299,8 @@ extension StringExtension on String {
   String get nonBreaking => replaceAll(' ', String.fromCharCode($nbsp));
 }
 
-const Size kConnectionManagerWindowSizeClosedChat = Size(300, 490);
-const Size kConnectionManagerWindowSizeOpenChat = Size(700, 490);
+const Size kConnectionManagerWindowSizeClosedChat = Size(600, 816);
+const Size kConnectionManagerWindowSizeOpenChat = Size(1000, 816);
 // Tabbar transition duration, now we remove the duration
 const Duration kTabTransitionDuration = Duration.zero;
 const double kEmptyMarginTop = 50;

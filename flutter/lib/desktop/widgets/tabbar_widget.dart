@@ -6,6 +6,7 @@ import 'package:bot_toast/bot_toast.dart';
 import 'package:desktop_multi_window/desktop_multi_window.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart' hide TabBarTheme;
+import 'package:flutter_svg/flutter_svg.dart';
 import 'package:flutter_hbb/common.dart';
 import 'package:flutter_hbb/consts.dart';
 import 'package:flutter_hbb/desktop/pages/remote_page.dart';
@@ -19,18 +20,26 @@ import 'package:scroll_pos/scroll_pos.dart';
 import 'package:window_manager/window_manager.dart';
 import 'package:visibility_detector/visibility_detector.dart';
 
+import '../../common/widgets/window_buttons.dart';
+import '../../common/widgets/styled_form_widgets.dart';
 import '../../utils/multi_window_manager.dart';
 
+// Main/Install windows use login page height (44px), others use original (28px)
 const double _kTabBarHeight = kDesktopRemoteTabBarHeight;
-const double _kIconSize = 18;
+const double _kMainTabBarHeight = kWindowButtonHeight; // 44px (same as login page)
+const double _kIconSize = 16;
 const double _kDividerIndent = 10;
 const double _kActionIconSize = 12;
 
+/// 탭 정보 클래스
+/// SVG 아이콘 경로 또는 Material 아이콘 지원
 class TabInfo {
   final String key; // Notice: cm use client_id.toString() as key
   final String label;
   final IconData? selectedIcon;
   final IconData? unselectedIcon;
+  /// SVG 아이콘 경로 (Material 아이콘 대신 사용)
+  final String? svgIconPath;
   final bool closable;
   final VoidCallback? onTabCloseButton;
   final VoidCallback? onTap;
@@ -41,6 +50,7 @@ class TabInfo {
       required this.label,
       this.selectedIcon,
       this.unselectedIcon,
+      this.svgIconPath,
       this.closable = true,
       this.onTabCloseButton,
       this.onTap,
@@ -431,7 +441,9 @@ class _DesktopTabState extends State<DesktopTab>
 
   @override
   void onWindowClose() async {
-    mainWindowClose() async => await windowManager.hide();
+    mainWindowClose() async {
+      await windowManager.hide();
+    }
     notMainWindowClose(WindowController windowController) async {
       if (controller.length != 0) {
         debugPrint("close not empty multiwindow from taskbar");
@@ -444,7 +456,7 @@ class _DesktopTabState extends State<DesktopTab>
         controller.clear();
       }
       await windowController.hide();
-      await rustDeskWinManager
+      await oneDeskWinManager
           .call(WindowType.Main, kWindowEventHide, {"id": kWindowId!});
     }
 
@@ -468,8 +480,8 @@ class _DesktopTabState extends State<DesktopTab>
 
     // hide window on close
     if (isMainWindow) {
-      if (rustDeskWinManager.getActiveWindows().contains(kMainWindowId)) {
-        await rustDeskWinManager.unregisterActiveWindow(kMainWindowId);
+      if (oneDeskWinManager.getActiveWindows().contains(kMainWindowId)) {
+        await oneDeskWinManager.unregisterActiveWindow(kMainWindowId);
       }
       // macOS specific workaround, the window is not hiding when in fullscreen.
       if (isMacOS && await windowManager.isFullScreen()) {
@@ -513,22 +525,21 @@ class _DesktopTabState extends State<DesktopTab>
       Obx(() {
         if (stateGlobal.showTabBar.isTrue &&
             !(kUseCompatibleUiMode && isHideSingleItem())) {
-          final showBottomDivider = _showTabBarBottomDivider(tabType);
-          return SizedBox(
-            height: _kTabBarHeight,
-            child: Column(
-              children: [
-                SizedBox(
-                  height:
-                      showBottomDivider ? _kTabBarHeight - 1 : _kTabBarHeight,
-                  child: _buildBar(),
+          // 모든 창에 44px 높이 사용 (통일된 디자인)
+          final barHeight = _kMainTabBarHeight;
+          return Container(
+            height: barHeight,
+            // 모든 창에 동일한 스타일 적용 (하단 테두리 포함)
+            decoration: BoxDecoration(
+              color: const Color(0xFFFEFEFE),
+              border: Border(
+                bottom: BorderSide(
+                  color: const Color(0xFFDEDEE2),
+                  width: 1,
                 ),
-                if (showBottomDivider)
-                  const Divider(
-                    height: 1,
-                  ),
-              ],
+              ),
             ),
+            child: _buildBar(),
           );
         } else {
           return Offstage();
@@ -636,16 +647,26 @@ class _DesktopTabState extends State<DesktopTab>
                       child: Row(children: [
                         Offstage(
                           offstage: !showLogo,
-                          child: loadIcon(16),
+                          child: Padding(
+                            padding: const EdgeInsets.only(left: 16),
+                            child: SvgPicture.asset(
+                              'assets/icons/topbar-logo.svg',
+                              width: 20,
+                              height: 20,
+                              colorFilter: const ColorFilter.mode(
+                                Color(0xFF5B7BF8),
+                                BlendMode.srcIn,
+                              ),
+                            ),
+                          ),
                         ),
                         Offstage(
                             offstage: !showTitle,
                             child: const Text(
-                              "RustDesk",
+                              "OneDesk",
                               style: TextStyle(fontSize: 13),
                             ).marginOnly(left: 2))
                       ]).marginOnly(
-                        left: 5,
                         right: 10,
                       ),
                     ),
@@ -750,6 +771,12 @@ class WindowActionPanelState extends State<WindowActionPanel> {
         .toList();
   }
 
+  void _toggleMaximize() {
+    toggleMaximize(widget.isMainWindow).then((maximize) {
+      stateGlobal.setMaximized(maximize);
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
     return Row(
@@ -766,149 +793,94 @@ class WindowActionPanelState extends State<WindowActionPanel> {
           }
         }),
         if (widget.tail != null) widget.tail!,
+        // 모든 창에 WindowControlButtons 사용 (통일된 디자인)
         if (!kUseCompatibleUiMode)
-          Row(
-            children: [
-              if (widget.showMinimize && !isMacOS)
-                ActionIcon(
-                  message: 'Minimize',
-                  icon: IconFont.min,
-                  onTap: () {
-                    if (widget.isMainWindow) {
-                      windowManager.minimize();
-                    } else {
-                      WindowController.fromWindowId(kWindowId!).minimize();
-                    }
-                  },
-                  isClose: false,
-                ),
-              if (widget.showMaximize && !isMacOS)
-                Obx(() => ActionIcon(
-                      message: stateGlobal.isMaximized.isTrue
-                          ? 'Restore'
-                          : 'Maximize',
-                      icon: stateGlobal.isMaximized.isTrue
-                          ? IconFont.restore
-                          : IconFont.max,
-                      onTap: bind.isIncomingOnly() && isInHomePage()
-                          ? null
-                          : _toggleMaximize,
-                      isClose: false,
-                    )),
-              if (widget.showClose && !isMacOS)
-                ActionIcon(
-                  message: 'Close',
-                  icon: IconFont.close,
-                  onTap: () async {
-                    final res = await widget.onClose?.call() ?? true;
-                    if (res) {
-                      // hide for all window
-                      // note: the main window can be restored by tray icon
-                      Future.delayed(Duration.zero, () async {
-                        if (widget.isMainWindow) {
-                          await windowManager.close();
-                        } else {
-                          await WindowController.fromWindowId(kWindowId!)
-                              .close();
-                        }
-                      });
-                    }
-                  },
-                  isClose: true,
-                )
-            ],
+          WindowControlButtons(
+            isMainWindow: widget.isMainWindow,
+            // 모든 창에 light 테마 사용 (회색 아이콘)
+            theme: WindowButtonTheme.light,
+            height: _kMainTabBarHeight,
+            showMinimize: widget.showMinimize,
+            showMaximize: widget.showMaximize && !(bind.isIncomingOnly() && isInHomePage()),
+            showClose: widget.showClose,
+            onClose: widget.onClose,
           ),
       ],
     );
   }
 
-  void _toggleMaximize() {
-    toggleMaximize(widget.isMainWindow).then((maximize) {
-      // update state for sub window, wc.unmaximize/maximize() will not invoke onWindowMaximize/Unmaximize
-      stateGlobal.setMaximized(maximize);
-    });
-  }
 }
 
-void startDragging(bool isMainWindow) {
-  if (isMainWindow) {
-    windowManager.startDragging();
-  } else {
-    WindowController.fromWindowId(kWindowId!).startDragging();
-  }
-}
+/// 창 드래그 시작 (window_buttons.dart의 함수 재노출)
+void startDragging(bool isMainWindow) => startWindowDragging(isMainWindow);
 
-void setMovable(bool isMainWindow, bool movable) {
-  if (isMainWindow) {
-    windowManager.setMovable(movable);
-  } else {
-    WindowController.fromWindowId(kWindowId!).setMovable(movable);
-  }
-}
+/// 창 이동 가능 여부 설정 (window_buttons.dart의 함수 재노출)
+void setMovable(bool isMainWindow, bool movable) => setWindowMovable(isMainWindow, movable);
 
-/// return true -> window will be maximize
-/// return false -> window will be unmaximize
-Future<bool> toggleMaximize(bool isMainWindow) async {
-  if (isMainWindow) {
-    if (await windowManager.isMaximized()) {
-      windowManager.unmaximize();
-      return false;
-    } else {
-      windowManager.maximize();
-      return true;
-    }
-  } else {
-    final wc = WindowController.fromWindowId(kWindowId!);
-    if (await wc.isMaximized()) {
-      wc.unmaximize();
-      return false;
-    } else {
-      wc.maximize();
-      return true;
-    }
-  }
-}
+/// 창 최대화 토글 (window_buttons.dart의 함수 재노출)
+Future<bool> toggleMaximize(bool isMainWindow) => toggleWindowMaximize(isMainWindow);
 
 Future<bool> closeConfirmDialog() async {
-  var confirm = true;
+  // 설정에서 현재 값 읽어오기
+  var confirm = mainGetLocalBoolOptionSync(kOptionEnableConfirmClosingTabs);
   final res = await gFFI.dialogManager.show<bool>((setState, close, context) {
-    submit() {
-      String value = bool2option(kOptionEnableConfirmClosingTabs, confirm);
-      bind.mainSetLocalOption(
-          key: kOptionEnableConfirmClosingTabs, value: value);
+    submit() async {
+      await mainSetLocalBoolOption(kOptionEnableConfirmClosingTabs, confirm);
       close(true);
     }
 
     return CustomAlertDialog(
-      title: Row(children: [
-        const Icon(Icons.warning_amber_sharp,
-            color: Colors.redAccent, size: 28),
-        const SizedBox(width: 10),
-        Text(translate("Warning")),
-      ]),
+      title: Text(
+        translate("Warning"),
+        style: MyTheme.dialogTitleStyle,
+      ),
       content: Column(
           mainAxisAlignment: MainAxisAlignment.start,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(translate("Disconnect all devices?")),
-            CheckboxListTile(
-              contentPadding: const EdgeInsets.all(0),
-              dense: true,
-              controlAffinity: ListTileControlAffinity.leading,
-              title: Text(
-                translate("Confirm before closing multiple tabs"),
-              ),
-              value: confirm,
-              onChanged: (v) {
-                if (v == null) return;
-                setState(() => confirm = v);
-              },
-            )
+            const SizedBox(height: 16),
+            // 체크박스 (세팅 페이지 스타일)
+            Row(
+              children: [
+                StyledCheckbox(
+                  value: confirm,
+                  onChanged: (v) {
+                    if (v == null) return;
+                    setState(() => confirm = v);
+                  },
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: GestureDetector(
+                    onTap: () => setState(() => confirm = !confirm),
+                    child: Text(
+                      translate("Confirm before closing multiple tabs"),
+                      style: const TextStyle(fontSize: 14),
+                    ),
+                  ),
+                ),
+              ],
+            ),
           ]),
-      // confirm checkbox
       actions: [
-        dialogButton("Cancel", onPressed: close, isOutline: true),
-        dialogButton("OK", onPressed: submit),
+        Row(
+          children: [
+            Expanded(
+              child: StyledOutlinedButton(
+                label: translate("Cancel"),
+                onPressed: close,
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: StyledPrimaryButton(
+                label: translate("OK"),
+                onPressed: submit,
+              ),
+            ),
+          ],
+        ),
       ],
       onSubmit: submit,
       onCancel: close,
@@ -992,6 +964,7 @@ class _ListView extends StatelessWidget {
                     tabType: controller.tabType,
                     selectedIcon: tab.selectedIcon,
                     unselectedIcon: tab.unselectedIcon,
+                    svgIconPath: tab.svgIconPath, // SVG 아이콘 경로 전달
                     closable: tab.closable,
                     selected: state.value.selected,
                     onClose: () {
@@ -1029,6 +1002,8 @@ class _Tab extends StatefulWidget {
   final DesktopTabType tabType;
   final IconData? selectedIcon;
   final IconData? unselectedIcon;
+  /// SVG 아이콘 경로 (Material 아이콘 대신 사용)
+  final String? svgIconPath;
   final bool closable;
   final int selected;
   final Function() onClose;
@@ -1048,6 +1023,7 @@ class _Tab extends StatefulWidget {
     required this.tabType,
     this.selectedIcon,
     this.unselectedIcon,
+    this.svgIconPath,
     this.tabBuilder,
     this.tabMenuBuilder,
     required this.closable,
@@ -1068,10 +1044,28 @@ class _TabState extends State<_Tab> with RestorationMixin {
   final RestorableBool restoreHover = RestorableBool(false);
 
   Widget _buildTabContent() {
-    bool showIcon =
+    // SVG 아이콘 또는 Material 아이콘 표시 여부
+    bool showSvgIcon = widget.svgIconPath != null;
+    bool showIcon = !showSvgIcon &&
         widget.selectedIcon != null && widget.unselectedIcon != null;
     bool isSelected = widget.index == widget.selected;
 
+    // SVG 아이콘 위젯 (svgIconPath가 있을 경우)
+    final svgIcon = Offstage(
+        offstage: !showSvgIcon,
+        child: SvgPicture.asset(
+          widget.svgIconPath ?? '',
+          width: _kIconSize,
+          height: _kIconSize,
+          colorFilter: ColorFilter.mode(
+            isSelected
+                ? (MyTheme.tabbar(context).selectedTabIconColor ?? MyTheme.accent)
+                : (MyTheme.tabbar(context).unSelectedTabIconColor ?? Colors.grey),
+            BlendMode.srcIn,
+          ),
+        ).paddingOnly(right: 5));
+
+    // Material 아이콘 위젯 (기존 방식)
     final icon = Offstage(
         offstage: !showIcon,
         child: Icon(
@@ -1095,7 +1089,8 @@ class _TabState extends State<_Tab> with RestorationMixin {
               style: TextStyle(
                   color: isSelected
                       ? MyTheme.tabbar(context).selectedTextColor
-                      : MyTheme.tabbar(context).unSelectedTextColor),
+                      : MyTheme.tabbar(context).unSelectedTextColor,
+                  fontSize: MyTheme.tabbar(context).fontSize),
               overflow: TextOverflow.ellipsis,
             ),
           ));
@@ -1106,14 +1101,18 @@ class _TabState extends State<_Tab> with RestorationMixin {
         return Row(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
+            // SVG 아이콘 또는 Material 아이콘 표시
+            svgIcon,
             icon,
             labelWidget,
           ],
         );
       } else {
+        // tabBuilder가 있는 경우 SVG 아이콘을 우선 사용
+        final iconWidget = showSvgIcon ? svgIcon : icon;
         return widget.tabBuilder!(
           widget.tabInfoKey,
-          icon,
+          iconWidget,
           labelWidget,
           TabThemeConf(iconSize: _kIconSize),
         );
@@ -1146,6 +1145,40 @@ class _TabState extends State<_Tab> with RestorationMixin {
     bool showDivider =
         widget.index != widget.selected - 1 && widget.index != widget.selected;
     RxBool hover = restoreHover.value.obs;
+
+    Widget tabContent = Container(
+      color: isSelected
+          ? widget.selectedTabBackgroundColor
+          : widget.unSelectedTabBackgroundColor,
+      child: Row(
+        children: [
+          SizedBox(
+              height: _showTabBarBottomDivider(widget.tabType)
+                  ? _kTabBarHeight - 1
+                  : _kTabBarHeight,
+              child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.center,
+                  children: [
+                    _buildTabContent(),
+                    Obx((() => _CloseButton(
+                          visible: hover.value && widget.closable,
+                          tabSelected: isSelected,
+                          onClose: () => widget.onClose(),
+                        )))
+                  ])).paddingOnly(left: 10, right: 5),
+          Offstage(
+            offstage: !showDivider,
+            child: VerticalDivider(
+              width: 1,
+              indent: _kDividerIndent,
+              endIndent: _kDividerIndent,
+              color: MyTheme.tabbar(context).dividerColor,
+            ),
+          )
+        ],
+      ),
+    );
+
     return Ink(
       child: InkWell(
         onHover: (value) {
@@ -1153,50 +1186,7 @@ class _TabState extends State<_Tab> with RestorationMixin {
           restoreHover.value = value;
         },
         onTap: () => widget.onTap(),
-        child: Container(
-            decoration: isSelected && widget.selectedBorderColor != null
-                ? BoxDecoration(
-                    border: Border(
-                      bottom: BorderSide(
-                        color: widget.selectedBorderColor!,
-                        width: 1,
-                      ),
-                    ),
-                  )
-                : null,
-            child: Container(
-              color: isSelected
-                  ? widget.selectedTabBackgroundColor
-                  : widget.unSelectedTabBackgroundColor,
-              child: Row(
-                children: [
-                  SizedBox(
-                      // _kTabBarHeight also displays normally
-                      height: _showTabBarBottomDivider(widget.tabType)
-                          ? _kTabBarHeight - 1
-                          : _kTabBarHeight,
-                      child: Row(
-                          crossAxisAlignment: CrossAxisAlignment.center,
-                          children: [
-                            _buildTabContent(),
-                            Obx((() => _CloseButton(
-                                  visible: hover.value && widget.closable,
-                                  tabSelected: isSelected,
-                                  onClose: () => widget.onClose(),
-                                )))
-                          ])).paddingOnly(left: 10, right: 5),
-                  Offstage(
-                    offstage: !showDivider,
-                    child: VerticalDivider(
-                      width: 1,
-                      indent: _kDividerIndent,
-                      endIndent: _kDividerIndent,
-                      color: MyTheme.tabbar(context).dividerColor,
-                    ),
-                  )
-                ],
-              ),
-            )),
+        child: tabContent,
       ),
     );
   }
@@ -1321,7 +1311,7 @@ class AddButton extends StatelessWidget {
     return ActionIcon(
         message: 'New Connection',
         icon: IconFont.add,
-        onTap: () => rustDeskWinManager.call(
+        onTap: () => oneDeskWinManager.call(
             WindowType.Main, kWindowMainWindowOnTop, ""),
         isClose: false);
   }
@@ -1442,6 +1432,7 @@ class TabbarTheme extends ThemeExtension<TabbarTheme> {
   final Color? hoverColor;
   final Color? closeHoverColor;
   final Color? selectedTabBackgroundColor;
+  final double fontSize; // 탭 텍스트 크기
 
   const TabbarTheme(
       {required this.selectedTabIconColor,
@@ -1453,31 +1444,35 @@ class TabbarTheme extends ThemeExtension<TabbarTheme> {
       required this.dividerColor,
       required this.hoverColor,
       required this.closeHoverColor,
-      required this.selectedTabBackgroundColor});
+      required this.selectedTabBackgroundColor,
+      required this.fontSize});
 
+  // 라이트 테마: 선택된 탭은 밝게, 선택되지 않은 탭은 어둡게
   static const light = TabbarTheme(
-      selectedTabIconColor: MyTheme.accent,
-      unSelectedTabIconColor: Color.fromARGB(255, 162, 203, 241),
-      selectedTextColor: Colors.black,
-      unSelectedTextColor: Color.fromARGB(255, 112, 112, 112),
+      selectedTabIconColor: Color(0xFF5F71FF), // 선택된 탭 아이콘: 버튼 호버 색상
+      unSelectedTabIconColor: Color(0xFFB9B8BF), // 비선택 탭 아이콘
+      selectedTextColor: Color(0xFF5F71FF), // 선택된 탭 텍스트: 버튼 호버 색상
+      unSelectedTextColor: Color(0xFFB9B8BF), // 비선택 탭 텍스트
       selectedIconColor: Color.fromARGB(255, 26, 26, 26),
       unSelectedIconColor: Color.fromARGB(255, 96, 96, 96),
-      dividerColor: Color.fromARGB(255, 238, 238, 238),
-      hoverColor: Colors.white54,
+      dividerColor: Color.fromARGB(255, 220, 225, 230),
+      hoverColor: Color.fromARGB(80, 255, 255, 255),
       closeHoverColor: Colors.white,
-      selectedTabBackgroundColor: Colors.white54);
+      selectedTabBackgroundColor: Color.fromARGB(120, 255, 255, 255), // 선택된 탭 배경: 밝은 흰색
+      fontSize: 14); // 탭 텍스트 크기
 
   static const dark = TabbarTheme(
-      selectedTabIconColor: MyTheme.accent,
-      unSelectedTabIconColor: Color.fromARGB(255, 30, 65, 98),
-      selectedTextColor: Colors.white,
-      unSelectedTextColor: Color.fromARGB(255, 192, 192, 192),
+      selectedTabIconColor: Color(0xFF5F71FF),
+      unSelectedTabIconColor: Color(0xFFB9B8BF),
+      selectedTextColor: Color(0xFF5F71FF),
+      unSelectedTextColor: Color(0xFFB9B8BF),
       selectedIconColor: Color.fromARGB(255, 192, 192, 192),
       unSelectedIconColor: Color.fromARGB(255, 255, 255, 255),
       dividerColor: Color.fromARGB(255, 64, 64, 64),
       hoverColor: Colors.black26,
       closeHoverColor: Colors.black,
-      selectedTabBackgroundColor: Colors.black26);
+      selectedTabBackgroundColor: Colors.black26,
+      fontSize: 14);
 
   @override
   ThemeExtension<TabbarTheme> copyWith({
@@ -1491,6 +1486,7 @@ class TabbarTheme extends ThemeExtension<TabbarTheme> {
     Color? hoverColor,
     Color? closeHoverColor,
     Color? selectedTabBackgroundColor,
+    double? fontSize,
   }) {
     return TabbarTheme(
       selectedTabIconColor: selectedTabIconColor ?? this.selectedTabIconColor,
@@ -1505,6 +1501,7 @@ class TabbarTheme extends ThemeExtension<TabbarTheme> {
       closeHoverColor: closeHoverColor ?? this.closeHoverColor,
       selectedTabBackgroundColor:
           selectedTabBackgroundColor ?? this.selectedTabBackgroundColor,
+      fontSize: fontSize ?? this.fontSize,
     );
   }
 
@@ -1532,6 +1529,7 @@ class TabbarTheme extends ThemeExtension<TabbarTheme> {
       closeHoverColor: Color.lerp(closeHoverColor, other.closeHoverColor, t),
       selectedTabBackgroundColor: Color.lerp(
           selectedTabBackgroundColor, other.selectedTabBackgroundColor, t),
+      fontSize: ui.lerpDouble(fontSize, other.fontSize, t)!,
     );
   }
 

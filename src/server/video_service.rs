@@ -1036,10 +1036,6 @@ fn get_recorder(
     display_idx: usize,
     camera: bool,
 ) -> Arc<Mutex<Option<Recorder>>> {
-    #[cfg(windows)]
-    let root = crate::platform::is_root();
-    #[cfg(not(windows))]
-    let root = false;
     let recorder = if record_incoming {
         use crate::hbbs_http::record_upload;
 
@@ -1050,10 +1046,11 @@ fn get_recorder(
         } else {
             None
         };
+        // Server side = incoming, so use true for incoming directory
         Recorder::new(RecorderContext {
             server: true,
             id: Config::get_id(),
-            dir: crate::ui_interface::video_save_directory(root),
+            dir: crate::ui_interface::video_save_directory(true),
             display_idx,
             camera,
             tx,

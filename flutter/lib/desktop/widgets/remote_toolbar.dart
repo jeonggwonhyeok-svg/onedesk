@@ -5,6 +5,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_hbb/common/widgets/audio_input.dart';
 import 'package:flutter_hbb/common/widgets/dialog.dart';
+import 'package:flutter_hbb/common/widgets/setting_widgets.dart';
+import 'package:flutter_hbb/common/widgets/styled_form_widgets.dart';
 import 'package:flutter_hbb/common/widgets/toolbar.dart';
 import 'package:flutter_hbb/models/chat_model.dart';
 import 'package:flutter_hbb/models/state_model.dart';
@@ -96,6 +98,9 @@ class _ToolbarTheme {
 
   static const Color redColor = Colors.redAccent;
   static const Color hoverRedColor = Colors.red;
+  // 연결 중(Connecting) 상태 색상 - 메인창 연결상태카드와 동일
+  static const Color orangeColor = Color(0xFFF59E0B);
+  static const Color hoverOrangeColor = Color(0xFFD97706);
   // kMinInteractiveDimension
   static const double height = 20.0;
   static const double dividerHeight = 12.0;
@@ -229,6 +234,20 @@ class _RemoteToolbarState extends State<RemoteToolbar> {
   final _fractionX = 0.5.obs;
   final _dragging = false.obs;
 
+  // 녹화 관련 상태
+  Timer? _recordingTimer;
+  final _recordingSeconds = 0.obs;
+  final _recordingPaused = false.obs;
+  final _recordingSound = true.obs;
+
+  // 보이스 콜 관련 상태
+  final _voiceCallMicOn = true.obs;
+  final _voiceCallSoundOn = true.obs;
+  String _savedVoiceCallMicDevice = '';
+
+  // 보기 모드 상태 (ffiModel.viewOnly를 반응형으로 추적)
+  final _isViewOnly = false.obs;
+
   int get windowId => stateGlobal.windowId;
 
   void _setFullscreen(bool v) {
@@ -274,6 +293,243 @@ class _RemoteToolbarState extends State<RemoteToolbar> {
         _isCursorOverImage = false;
       }
     });
+
+    // 녹화 모델 리스너
+    widget.ffi.recordingModel.addListener(_onRecordingChanged);
+
+    // 보이스 콜 상태 리스너
+    widget.ffi.chatModel.voiceCallStatus.listen(_onVoiceCallStatusChanged);
+
+    // ffiModel 리스너 (viewOnly 상태 추적)
+    widget.ffi.ffiModel.addListener(_onFfiModelChanged);
+    _isViewOnly.value = widget.ffi.ffiModel.viewOnly;
+  }
+
+  void _onFfiModelChanged() {
+    _isViewOnly.value = widget.ffi.ffiModel.viewOnly;
+  }
+
+  void _onVoiceCallStatusChanged(VoiceCallStatus status) async {
+    if (status == VoiceCallStatus.connected ||
+        status == VoiceCallStatus.waitingForResponse) {
+      // 보이스 콜 시작 시 현재 마이크 장치 저장
+      _savedVoiceCallMicDevice =
+          await bind.getVoiceCallInputDevice(isCm: false);
+      if (_savedVoiceCallMicDevice.isEmpty) {
+        // 기본 마이크 장치 찾기
+        final devices = (await bind.mainGetSoundInputs()).toList();
+        if (devices.isNotEmpty) {
+          _savedVoiceCallMicDevice = devices.first;
+        }
+      }
+      // 상태 초기화
+      _voiceCallMicOn.value = true;
+      _voiceCallSoundOn.value = true;
+    }
+  }
+
+  void _onRecordingChanged() {
+    final isRecording = widget.ffi.recordingModel.start;
+    if (isRecording && _recordingTimer == null) {
+      _startRecordingTimer();
+    } else if (!isRecording && _recordingTimer != null) {
+      _stopRecordingTimer();
+    }
+  }
+
+  void _startRecordingTimer() {
+    _recordingSeconds.value = 0;
+    _recordingPaused.value = false;
+    _recordingTimer = Timer.periodic(Duration(seconds: 1), (timer) {
+      if (!_recordingPaused.value) {
+        _recordingSeconds.value++;
+      }
+    });
+  }
+
+  void _stopRecordingTimer() {
+    _recordingTimer?.cancel();
+    _recordingTimer = null;
+    _recordingSeconds.value = 0;
+  }
+
+  String _formatRecordingTime(int seconds) {
+    final h = (seconds ~/ 3600).toString().padLeft(2, '0');
+    final m = ((seconds % 3600) ~/ 60).toString().padLeft(2, '0');
+    final s = (seconds % 60).toString().padLeft(2, '0');
+    return '$h:$m:$s';
+  }
+
+  Widget _buildRecordingBox(BuildContext context, BorderRadius borderRadius) {
+    return Material(
+      elevation: _ToolbarTheme.elevation,
+      shadowColor: MyTheme.color(context).shadow,
+      borderRadius: borderRadius,
+      color: Colors.white,
+      child: Container(
+        padding: EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+        decoration: BoxDecoration(
+          borderRadius: borderRadius,
+          border: Border.all(color: Colors.grey[300]!, width: 1),
+        ),
+        child: Obx(() => Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                // 중지 버튼
+                _CustomToolbarButton(
+                  assetName: 'assets/icons/remote-record-stop.svg',
+                  tooltip: translate('Stop Recording'),
+                  onPressed: _stopRecording,
+                ),
+                // 일시정지/재개 토글
+                _CustomToolbarButton(
+                  assetName: _recordingPaused.value
+                      ? 'assets/icons/remote-record-start.svg'
+                      : 'assets/icons/remote-record-pause.svg',
+                  tooltip: translate(_recordingPaused.value
+                      ? 'Resume Recording'
+                      : 'Pause Recording'),
+                  onPressed: _toggleRecordingPause,
+                ),
+                // 시스템 소리 토글
+                _CustomToolbarButton(
+                  assetName: _recordingSound.value
+                      ? 'assets/icons/remote-record-sound-off.svg'
+                      : 'assets/icons/remote-record-sound.svg',
+                  tooltip: translate(_recordingSound.value
+                      ? 'Mute System Sound'
+                      : 'Unmute System Sound'),
+                  onPressed: _toggleRecordingSound,
+                ),
+                SizedBox(width: 8),
+                // 녹화 시간 표시
+                Text(
+                  _formatRecordingTime(_recordingSeconds.value),
+                  style: TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w500,
+                    color: const Color(0xFF5F71FF),
+                  ),
+                ),
+              ],
+            )),
+      ),
+    );
+  }
+
+  void _stopRecording() {
+    widget.ffi.recordingModel.toggle();
+  }
+
+  void _toggleRecordingPause() {
+    _recordingPaused.value = !_recordingPaused.value;
+  }
+
+  void _toggleRecordingSound() {
+    _recordingSound.value = !_recordingSound.value;
+  }
+
+  // 보이스 콜 박스
+  Widget _buildVoiceCallBox(BuildContext context, BorderRadius borderRadius) {
+    return Material(
+      elevation: _ToolbarTheme.elevation,
+      shadowColor: MyTheme.color(context).shadow,
+      borderRadius: borderRadius,
+      color: Colors.white,
+      child: Container(
+        padding: EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+        decoration: BoxDecoration(
+          borderRadius: borderRadius,
+          border: Border.all(color: Colors.grey[300]!, width: 1),
+        ),
+        child: Obx(() => Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                // 통화 종료
+                _CustomToolbarButton(
+                  assetName: 'assets/icons/remote_voice_call_off.svg',
+                  tooltip: translate('End Call'),
+                  onPressed: _endVoiceCall,
+                  backgroundColor: const Color(0xFFFE3E3E),
+                  iconColor: Colors.white,
+                ),
+                // 마이크 토글
+                _CustomToolbarButton(
+                  assetName: _voiceCallMicOn.value
+                      ? 'assets/icons/remote_mic.svg'
+                      : 'assets/icons/remote_mic_off.svg',
+                  tooltip: translate(_voiceCallMicOn.value ? 'Mute' : 'Unmute'),
+                  onPressed: _toggleVoiceCallMic,
+                ),
+                // 스피커 토글
+                _CustomToolbarButton(
+                  assetName: _voiceCallSoundOn.value
+                      ? 'assets/icons/remote_sound.svg'
+                      : 'assets/icons/remote_sound_off.svg',
+                  tooltip: translate(
+                      _voiceCallSoundOn.value ? 'Mute Sound' : 'Unmute Sound'),
+                  onPressed: _toggleVoiceCallSound,
+                ),
+              ],
+            )),
+      ),
+    );
+  }
+
+  // 보이스 콜 대기 중 박스 (주황색 아이콘)
+  Widget _buildVoiceCallWaitingBox(
+      BuildContext context, BorderRadius borderRadius) {
+    return Material(
+      elevation: _ToolbarTheme.elevation,
+      shadowColor: MyTheme.color(context).shadow,
+      borderRadius: borderRadius,
+      color: Colors.white,
+      child: Container(
+        padding: EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+        decoration: BoxDecoration(
+          borderRadius: borderRadius,
+          border: Border.all(color: Colors.grey[300]!, width: 1),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            // 통화 취소 (주황색)
+            _CustomToolbarButton(
+              assetName: 'assets/call_wait.svg',
+              tooltip: translate('Cancel'),
+              onPressed: _endVoiceCall,
+              backgroundColor: _ToolbarTheme.orangeColor,
+              iconColor: Colors.white,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _endVoiceCall() {
+    bind.sessionCloseVoiceCall(sessionId: widget.ffi.sessionId);
+  }
+
+  void _toggleVoiceCallMic() async {
+    _voiceCallMicOn.value = !_voiceCallMicOn.value;
+    if (_voiceCallMicOn.value) {
+      // 마이크 켜기 - 저장된 장치로 복원
+      await bind.setVoiceCallInputDevice(
+          isCm: false, device: _savedVoiceCallMicDevice);
+    } else {
+      // 마이크 끄기 - 빈 문자열로 설정
+      await bind.setVoiceCallInputDevice(isCm: false, device: '');
+    }
+  }
+
+  void _toggleVoiceCallSound() {
+    _voiceCallSoundOn.value = !_voiceCallSoundOn.value;
+    // 클라이언트 측 오디오 비활성화 토글
+    bind.sessionToggleOption(
+      sessionId: widget.ffi.sessionId,
+      value: 'disable-audio',
+    );
   }
 
   _debouncerHideProc(int v) {
@@ -284,6 +540,7 @@ class _RemoteToolbarState extends State<RemoteToolbar> {
 
   @override
   dispose() {
+    widget.ffi.ffiModel.removeListener(_onFfiModelChanged);
     super.dispose();
 
     widget.onEnterOrLeaveImageCleaner(identityHashCode(this));
@@ -305,26 +562,18 @@ class _RemoteToolbarState extends State<RemoteToolbar> {
         triggerAutoHide();
       }
       final borderRadius = BorderRadius.vertical(
-        bottom: Radius.circular(5),
+        bottom: Radius.circular(8),
       );
       return Align(
         alignment: FractionalOffset(_fractionX.value, 0),
         child: Offstage(
           offstage: _dragging.isTrue,
-          child: Material(
-            elevation: _ToolbarTheme.elevation,
-            shadowColor: MyTheme.color(context).shadow,
+          child: _MiniToolbar(
+            show: show,
+            fractionX: _fractionX,
+            dragging: _dragging,
+            sessionId: widget.ffi.sessionId,
             borderRadius: borderRadius,
-            child: _DraggableShowHide(
-              id: widget.id,
-              sessionId: widget.ffi.sessionId,
-              dragging: _dragging,
-              fractionX: _fractionX,
-              toolbarState: widget.state,
-              setFullscreen: _setFullscreen,
-              setMinimize: _minimize,
-              borderRadius: borderRadius,
-            ),
           ),
         ),
       );
@@ -332,75 +581,853 @@ class _RemoteToolbarState extends State<RemoteToolbar> {
   }
 
   Widget _buildToolbar(BuildContext context) {
-    final List<Widget> toolbarItems = [];
-    toolbarItems.add(_PinMenu(state: widget.state));
-    if (!isWebDesktop) {
-      toolbarItems.add(_MobileActionMenu(ffi: widget.ffi));
+    final toolbarBorderRadius = BorderRadius.all(Radius.circular(8.0));
+    final isFullscreen = stateGlobal.fullscreen;
+
+    return ListenableBuilder(
+      listenable: widget.ffi.recordingModel,
+      builder: (context, child) {
+        final isRecording = widget.ffi.recordingModel.start;
+        return Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            // 왼쪽 그룹: 파일전송, 녹화/스크린샷, 채팅/음성/카메라, 더보기
+            Material(
+              elevation: _ToolbarTheme.elevation,
+              shadowColor: MyTheme.color(context).shadow,
+              borderRadius: toolbarBorderRadius,
+              color: Colors.white,
+              child: Container(
+                padding: EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+                decoration: BoxDecoration(
+                  borderRadius: toolbarBorderRadius,
+                  border: Border.all(color: Colors.grey[300]!, width: 1),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    // 파일 전송
+                    _CustomToolbarButton(
+                      assetName: 'assets/icons/remote_file.svg',
+                      tooltip: translate('File Transfer'),
+                      onPressed: () => _openFileTransfer(),
+                    ),
+                    // 녹화/스크린샷
+                    _CustomToolbarPopupMenu(
+                      assetName: 'assets/icons/remote_screen.svg',
+                      tooltip: translate('Recording'),
+                      menuItems: [
+                        _PopupMenuItem(
+                          text: translate('Record Screen'),
+                          onTap: () => _startRecording(),
+                        ),
+                        _PopupMenuItem(
+                          text: translate('Screenshot'),
+                          onTap: () => _takeScreenshot(),
+                        ),
+                      ],
+                    ),
+                    // 채팅/음성/카메라/보기모드
+                    Obx(() {
+                      final voiceCallStatus =
+                          widget.ffi.chatModel.voiceCallStatus.value;
+                      final isVoiceCallActive = voiceCallStatus ==
+                              VoiceCallStatus.waitingForResponse ||
+                          voiceCallStatus == VoiceCallStatus.connected;
+                      final isViewOnly = _isViewOnly.value;
+                      return _CustomToolbarPopupMenu(
+                        assetName: 'assets/icons/remote_group.svg',
+                        tooltip: translate('Communication'),
+                        menuItems: [
+                          _PopupMenuItem(
+                            text: translate('Chat'),
+                            onTap: () => _openChat(),
+                          ),
+                          _PopupMenuItem(
+                            text: translate(isVoiceCallActive
+                                ? 'End Voice Call'
+                                : 'Voice Call'),
+                            onTap: () => isVoiceCallActive
+                                ? _endVoiceCall()
+                                : _startVoiceCall(),
+                          ),
+                          _PopupMenuItem(
+                            text: translate('View Camera'),
+                            onTap: () => _viewCamera(),
+                          ),
+                          _PopupMenuItem(
+                            text: translate(
+                                isViewOnly ? 'Control Mode' : 'View Mode'),
+                            onTap: () => _toggleViewMode(),
+                          ),
+                        ],
+                      );
+                    }),
+                    // 더보기
+                    _CustomToolbarPopupMenu(
+                      assetName: 'assets/icons/remote_more.svg',
+                      tooltip: translate('More'),
+                      menuItems: [
+                        _PopupMenuItem(
+                          text: translate('Display Settings'),
+                          onTap: () => _openDisplaySettings(),
+                        ),
+                        _PopupMenuItem(
+                          text: translate('Restart Remote'),
+                          onTap: () => _restartRemote(),
+                        ),
+                        _PopupMenuItem(
+                          assetPath: 'assets/icons/remote-connection-end.svg',
+                          text: translate('Shutdown Remote'),
+                          onTap: () => _shutdownRemote(),
+                          iconColor: const Color(0xFFFE3E3E),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            SizedBox(width: 8),
+            // 녹화 중일 때 녹화 박스 표시
+            if (isRecording) ...[
+              _buildRecordingBox(context, toolbarBorderRadius),
+              SizedBox(width: 8),
+            ],
+            // 보이스 콜 상태에 따라 다른 UI 표시
+            Obx(() {
+              final voiceCallStatus =
+                  widget.ffi.chatModel.voiceCallStatus.value;
+              if (voiceCallStatus == VoiceCallStatus.waitingForResponse) {
+                // 수락 대기 중: 주황색 대기 아이콘
+                return Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    _buildVoiceCallWaitingBox(context, toolbarBorderRadius),
+                    SizedBox(width: 8),
+                  ],
+                );
+              } else if (voiceCallStatus == VoiceCallStatus.connected) {
+                // 연결됨: 빨간 종료 버튼 + 마이크/스피커 토글
+                return Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    _buildVoiceCallBox(context, toolbarBorderRadius),
+                    SizedBox(width: 8),
+                  ],
+                );
+              }
+              return SizedBox.shrink();
+            }),
+            // 오른쪽 그룹: 풀스크린, 접기
+            Material(
+              elevation: _ToolbarTheme.elevation,
+              shadowColor: MyTheme.color(context).shadow,
+              borderRadius: toolbarBorderRadius,
+              color: Colors.white,
+              child: Container(
+                padding: EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+                decoration: BoxDecoration(
+                  borderRadius: toolbarBorderRadius,
+                  border: Border.all(color: Colors.grey[300]!, width: 1),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    // 풀스크린 토글
+                    Obx(() => _CustomToolbarButton(
+                          assetName: 'assets/icons/remote_full.svg',
+                          tooltip: translate(isFullscreen.isTrue
+                              ? 'Exit Fullscreen'
+                              : 'Fullscreen'),
+                          onPressed: () => _setFullscreen(!isFullscreen.value),
+                          isPressed: isFullscreen.value,
+                        )),
+                    // 접기
+                    _CustomToolbarButton(
+                      assetName: 'assets/icons/remote_up_arrow.svg',
+                      tooltip: translate('Collapse'),
+                      onPressed: () => show.value = false,
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  // 파일 전송 열기
+  void _openFileTransfer() async {
+    // 현재 세션의 connToken을 가져와서 파일 전송 시 비밀번호 재입력 없이 연결
+    final connToken = bind.sessionGetConnToken(sessionId: widget.ffi.sessionId);
+    debugPrint('[FileTransfer] connToken: ${connToken != null ? "exists (${connToken.length} chars)" : "NULL"}');
+    await oneDeskWinManager.newFileTransfer(widget.id,
+        forceRelay: false,
+        connToken: connToken);
+  }
+
+  // 녹화 시작
+  void _startRecording() {
+    widget.ffi.recordingModel.toggle();
+  }
+
+  // 스크린샷
+  void _takeScreenshot() {
+    bind.sessionTakeScreenshot(
+        sessionId: widget.ffi.sessionId, display: pi.currentDisplay);
+  }
+
+  // 채팅 열기
+  void _openChat() {
+    widget.ffi.chatModel
+        .changeCurrentKey(MessageKey(widget.ffi.id, ChatModel.clientModeID));
+    widget.ffi.chatModel.toggleChatOverlay();
+  }
+
+  // 음성 통화
+  void _startVoiceCall() {
+    bind.sessionRequestVoiceCall(sessionId: widget.ffi.sessionId);
+  }
+
+  // 카메라 보기
+  void _viewCamera() async {
+    await oneDeskWinManager.newViewCamera(widget.id, forceRelay: false);
+  }
+
+  // 보기 모드 토글
+  void _toggleViewMode() async {
+    await bind.sessionToggleOption(
+      sessionId: widget.ffi.sessionId,
+      value: kOptionToggleViewOnly,
+    );
+    final viewOnly = await bind.sessionGetToggleOption(
+      sessionId: widget.ffi.sessionId,
+      arg: kOptionToggleViewOnly,
+    );
+    widget.ffi.ffiModel.setViewOnly(widget.id, viewOnly ?? !_isViewOnly.value);
+  }
+
+  // 디스플레이 설정 - 원격 세션에 직접 적용되는 팝업 (메인 설정 디자인)
+  void _openDisplaySettings() async {
+    final sessionId = widget.ffi.sessionId;
+    final ffi = widget.ffi;
+
+    // 메인 설정의 기본값 가져오기 (원격창 팝업은 메인 설정값을 표시)
+    String viewStyleValue =
+        bind.mainGetUserDefaultOption(key: kOptionViewStyle);
+    if (viewStyleValue.isEmpty) viewStyleValue = kRemoteViewStyleAdaptive;
+    String imageQualityValue =
+        bind.mainGetUserDefaultOption(key: kOptionImageQuality);
+    if (imageQualityValue.isEmpty)
+      imageQualityValue = kRemoteImageQualityBalanced;
+    String scrollStyleValue =
+        bind.mainGetUserDefaultOption(key: kOptionScrollStyle);
+    if (scrollStyleValue.isEmpty) scrollStyleValue = kRemoteScrollStyleAuto;
+    String codecValue =
+        bind.mainGetUserDefaultOption(key: kOptionCodecPreference);
+    if (codecValue.isEmpty) codecValue = 'auto';
+
+    // 트랙패드 속도 가져오기 (사용자 기본 설정에서 읽음)
+    int trackpadSpeedValue = int.tryParse(
+            bind.mainGetUserDefaultOption(key: kKeyTrackpadSpeed)) ??
+        kDefaultTrackpadSpeed;
+
+    // 코덱 옵션 가져오기
+    final alternativeCodecs =
+        await bind.sessionAlternativeCodecs(sessionId: sessionId);
+    Map<String, bool> availableCodecs = {
+      'vp8': false,
+      'av1': false,
+      'h264': false,
+      'h265': false
+    };
+    try {
+      final codecsJson = jsonDecode(alternativeCodecs);
+      availableCodecs = {
+        'vp8': codecsJson['vp8'] ?? false,
+        'av1': codecsJson['av1'] ?? false,
+        'h264': codecsJson['h264'] ?? false,
+        'h265': codecsJson['h265'] ?? false,
+      };
+    } catch (e) {
+      debugPrint("Failed to parse codecs: $e");
     }
 
-    toolbarItems.add(Obx(() {
-      if (PrivacyModeState.find(widget.id).isEmpty &&
-          pi.displaysCount.value > 1) {
-        return _MonitorMenu(
-            id: widget.id,
-            ffi: widget.ffi,
-            setRemoteState: widget.setRemoteState);
-      } else {
-        return Offstage();
-      }
-    }));
+    // Other 옵션들 가져오기 (공통 정의에서 읽기)
+    // 모든 옵션을 세션 상태에서 읽어서 현재 상태를 정확히 표시
+    Map<String, bool> otherOptions = {};
+    final displayOptions = getCommonDisplayOptions(forToolbarDialog: true);
+    for (final opt in displayOptions) {
+      final value = bind.sessionGetToggleOptionSync(
+          sessionId: sessionId, arg: opt.toggleKey);
+      otherOptions[opt.optionKey] = value;
+    }
 
-    toolbarItems
-        .add(_ControlMenu(id: widget.id, ffi: widget.ffi, state: widget.state));
-    toolbarItems.add(_DisplayMenu(
-      id: widget.id,
-      ffi: widget.ffi,
-      state: widget.state,
-      setFullscreen: _setFullscreen,
-    ));
-    // Do not show keyboard for camera connection type.
-    if (widget.ffi.connType == ConnType.defaultConn) {
-      toolbarItems.add(_KeyboardMenu(id: widget.id, ffi: widget.ffi));
-    }
-    toolbarItems.add(_ChatMenu(id: widget.id, ffi: widget.ffi));
-    if (!isWeb) {
-      toolbarItems.add(_VoiceCallMenu(id: widget.id, ffi: widget.ffi));
-    }
-    if (!isWeb) toolbarItems.add(_RecordMenu());
-    toolbarItems.add(_CloseMenu(id: widget.id, ffi: widget.ffi));
-    final toolbarBorderRadius = BorderRadius.all(Radius.circular(4.0));
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Material(
-          elevation: _ToolbarTheme.elevation,
-          shadowColor: MyTheme.color(context).shadow,
-          borderRadius: toolbarBorderRadius,
-          color: Theme.of(context)
-              .menuBarTheme
-              .style
-              ?.backgroundColor
-              ?.resolve(MaterialState.values.toSet()),
-          child: SingleChildScrollView(
-            scrollDirection: Axis.horizontal,
-            child: Theme(
-              data: themeData(),
-              child: _ToolbarTheme.borderWrapper(
-                  context,
-                  Row(
-                    children: [
-                      SizedBox(width: _ToolbarTheme.buttonHMargin * 2),
-                      ...toolbarItems,
-                      SizedBox(width: _ToolbarTheme.buttonHMargin * 2)
-                    ],
+    widget.ffi.dialogManager.show((setState, close, context) {
+      // 카드 디자인 상수 (메인 설정과 동일)
+      const cardBgColor = Colors.white;
+      const accentColor = Color(0xFF5F71FF);
+      const textColor = Color(0xFF475569);
+
+      // 라디오 버튼 빌더 (메인 설정 스타일)
+      Widget buildRadio<T>({
+        required T value,
+        required T groupValue,
+        required String label,
+        required Function(T) onChanged,
+      }) {
+        return MouseRegion(
+          cursor: SystemMouseCursors.click,
+          child: GestureDetector(
+            onTap: () => onChanged(value),
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(16, 10, 16, 0),
+              child: Row(
+                children: [
+                  Container(
+                    width: 22,
+                    height: 22,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      border: Border.all(
+                        color: value == groupValue
+                            ? accentColor
+                            : const Color(0xFFD1D5DB),
+                        width: 1,
+                      ),
+                    ),
+                    child: value == groupValue
+                        ? Center(
+                            child: Container(
+                              width: 10,
+                              height: 10,
+                              decoration: const BoxDecoration(
+                                shape: BoxShape.circle,
+                                color: accentColor,
+                              ),
+                            ),
+                          )
+                        : null,
                   ),
-                  toolbarBorderRadius),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      translate(label),
+                      style: const TextStyle(fontSize: 14, color: textColor),
+                    ),
+                  ),
+                ],
+              ),
             ),
           ),
+        );
+      }
+
+      // 체크박스 빌더 (Other 옵션용)
+      Widget buildCheckbox({
+        required String optionKey,
+        required String label,
+        required bool value,
+        required Function(bool) onChanged,
+      }) {
+        return MouseRegion(
+          cursor: SystemMouseCursors.click,
+          child: GestureDetector(
+            onTap: () => onChanged(!value),
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(16, 10, 16, 0),
+              child: Row(
+                children: [
+                  Container(
+                    width: 22,
+                    height: 22,
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(4),
+                      border: Border.all(
+                        color: value ? accentColor : const Color(0xFFD1D5DB),
+                        width: 1,
+                      ),
+                      color: value ? accentColor : Colors.transparent,
+                    ),
+                    child: value
+                        ? const Icon(Icons.check, size: 16, color: Colors.white)
+                        : null,
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      translate(label),
+                      style: const TextStyle(fontSize: 14, color: textColor),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        );
+      }
+
+      // 카드 빌더 (메인 설정 스타일)
+      Widget buildCard(
+          {required String title, required List<Widget> children}) {
+        return Container(
+          margin: const EdgeInsets.only(top: 12),
+          decoration: BoxDecoration(
+            color: cardBgColor,
+            borderRadius: BorderRadius.circular(12),
+            boxShadow: [
+              BoxShadow(
+                color: const Color(0x1A1B2151),
+                blurRadius: 8,
+                offset: const Offset(0, 2),
+              ),
+            ],
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // 타이틀
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 14, 16, 8),
+                child: Text(
+                  translate(title),
+                  style: const TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.bold,
+                    color: Color(0xFF454447),
+                  ),
+                ),
+              ),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16),
+                child: const Divider(height: 1),
+              ),
+              ...children,
+              const SizedBox(height: 14),
+            ],
+          ),
+        );
+      }
+
+      return CustomAlertDialog(
+        titlePadding: const EdgeInsets.fromLTRB(16, 14, 16, -8),
+        title: Row(
+          children: [
+            SvgPicture.asset(
+              'assets/icons/topbar-logo.svg',
+              width: 18,
+              height: 18,
+              colorFilter:
+                  const ColorFilter.mode(Color(0xFF5B7BF8), BlendMode.srcIn),
+            ),
+            const SizedBox(width: 8),
+            Text(
+              translate('Display'),
+              style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w500),
+            ),
+          ],
         ),
-        _buildDraggableShowHide(context),
-      ],
-    );
+        contentBoxConstraints: const BoxConstraints(maxWidth: 530),
+        content: StatefulBuilder(
+          builder: (context, setDialogState) {
+            return SizedBox(
+              height: 520,
+              child: Column(
+                children: [
+                  // 타이틀 하단 구분선
+                  const Divider(height: 1),
+                  const SizedBox(height: 4),
+                  Expanded(
+                    child: SingleChildScrollView(
+                      padding: const EdgeInsets.symmetric(horizontal: 4),
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          // 보기 스타일
+                          buildCard(
+                            title: 'Default View Style',
+                            children: [
+                              buildRadio<String>(
+                                value: kRemoteViewStyleOriginal,
+                                groupValue: viewStyleValue,
+                                label: 'Scale original',
+                                onChanged: (value) {
+                                  setDialogState(() => viewStyleValue = value);
+                                  bind.mainSetUserDefaultOption(
+                                      key: kOptionViewStyle, value: value);
+                                  bind
+                                      .sessionSetViewStyle(
+                                          sessionId: sessionId, value: value)
+                                      .then((_) =>
+                                          ffi.canvasModel.updateViewStyle());
+                                },
+                              ),
+                              buildRadio<String>(
+                                value: kRemoteViewStyleAdaptive,
+                                groupValue: viewStyleValue,
+                                label: 'Scale adaptive',
+                                onChanged: (value) {
+                                  setDialogState(() => viewStyleValue = value);
+                                  bind.mainSetUserDefaultOption(
+                                      key: kOptionViewStyle, value: value);
+                                  bind
+                                      .sessionSetViewStyle(
+                                          sessionId: sessionId, value: value)
+                                      .then((_) =>
+                                          ffi.canvasModel.updateViewStyle());
+                                },
+                              ),
+                            ],
+                          ),
+
+                          // 스크롤 스타일
+                          buildCard(
+                            title: 'Scroll Style',
+                            children: [
+                              buildRadio<String>(
+                                value: kRemoteScrollStyleAuto,
+                                groupValue: scrollStyleValue,
+                                label: 'ScrollAuto',
+                                onChanged: (value) {
+                                  setDialogState(
+                                      () => scrollStyleValue = value);
+                                  bind.mainSetUserDefaultOption(
+                                      key: kOptionScrollStyle, value: value);
+                                  bind
+                                      .sessionSetScrollStyle(
+                                          sessionId: sessionId, value: value)
+                                      .then((_) =>
+                                          ffi.canvasModel.updateScrollStyle());
+                                },
+                              ),
+                              buildRadio<String>(
+                                value: kRemoteScrollStyleBar,
+                                groupValue: scrollStyleValue,
+                                label: 'Scrollbar',
+                                onChanged: (value) {
+                                  setDialogState(
+                                      () => scrollStyleValue = value);
+                                  bind.mainSetUserDefaultOption(
+                                      key: kOptionScrollStyle, value: value);
+                                  bind
+                                      .sessionSetScrollStyle(
+                                          sessionId: sessionId, value: value)
+                                      .then((_) =>
+                                          ffi.canvasModel.updateScrollStyle());
+                                },
+                              ),
+                            ],
+                          ),
+
+                          // 이미지 품질
+                          buildCard(
+                            title: 'Image Quality',
+                            children: [
+                              buildRadio<String>(
+                                value: kRemoteImageQualityBest,
+                                groupValue: imageQualityValue,
+                                label: 'Good image quality',
+                                onChanged: (value) {
+                                  setDialogState(
+                                      () => imageQualityValue = value);
+                                  bind.mainSetUserDefaultOption(
+                                      key: kOptionImageQuality, value: value);
+                                  bind.sessionSetImageQuality(
+                                      sessionId: sessionId, value: value);
+                                },
+                              ),
+                              buildRadio<String>(
+                                value: kRemoteImageQualityBalanced,
+                                groupValue: imageQualityValue,
+                                label: 'Balanced',
+                                onChanged: (value) {
+                                  setDialogState(
+                                      () => imageQualityValue = value);
+                                  bind.mainSetUserDefaultOption(
+                                      key: kOptionImageQuality, value: value);
+                                  bind.sessionSetImageQuality(
+                                      sessionId: sessionId, value: value);
+                                },
+                              ),
+                              buildRadio<String>(
+                                value: kRemoteImageQualityLow,
+                                groupValue: imageQualityValue,
+                                label: 'Optimize reaction time',
+                                onChanged: (value) {
+                                  setDialogState(
+                                      () => imageQualityValue = value);
+                                  bind.mainSetUserDefaultOption(
+                                      key: kOptionImageQuality, value: value);
+                                  bind.sessionSetImageQuality(
+                                      sessionId: sessionId, value: value);
+                                },
+                              ),
+                            ],
+                          ),
+
+                          // 코덱
+                          buildCard(
+                            title: 'Codec',
+                            children: [
+                              buildRadio<String>(
+                                value: 'auto',
+                                groupValue: codecValue,
+                                label: 'Auto',
+                                onChanged: (value) async {
+                                  setDialogState(() => codecValue = value);
+                                  bind.mainSetUserDefaultOption(
+                                      key: kOptionCodecPreference, value: value);
+                                  await bind.sessionPeerOption(
+                                      sessionId: sessionId,
+                                      name: kOptionCodecPreference,
+                                      value: value);
+                                  bind.sessionChangePreferCodec(
+                                      sessionId: sessionId);
+                                },
+                              ),
+                              if (availableCodecs['vp8'] == true)
+                                buildRadio<String>(
+                                  value: 'vp8',
+                                  groupValue: codecValue,
+                                  label: 'VP8',
+                                  onChanged: (value) async {
+                                    setDialogState(() => codecValue = value);
+                                    bind.mainSetUserDefaultOption(
+                                        key: kOptionCodecPreference, value: value);
+                                    await bind.sessionPeerOption(
+                                        sessionId: sessionId,
+                                        name: kOptionCodecPreference,
+                                        value: value);
+                                    bind.sessionChangePreferCodec(
+                                        sessionId: sessionId);
+                                  },
+                                ),
+                              buildRadio<String>(
+                                value: 'vp9',
+                                groupValue: codecValue,
+                                label: 'VP9',
+                                onChanged: (value) async {
+                                  setDialogState(() => codecValue = value);
+                                  bind.mainSetUserDefaultOption(
+                                      key: kOptionCodecPreference, value: value);
+                                  await bind.sessionPeerOption(
+                                      sessionId: sessionId,
+                                      name: kOptionCodecPreference,
+                                      value: value);
+                                  bind.sessionChangePreferCodec(
+                                      sessionId: sessionId);
+                                },
+                              ),
+                              if (availableCodecs['av1'] == true)
+                                buildRadio<String>(
+                                  value: 'av1',
+                                  groupValue: codecValue,
+                                  label: 'AV1',
+                                  onChanged: (value) async {
+                                    setDialogState(() => codecValue = value);
+                                    bind.mainSetUserDefaultOption(
+                                        key: kOptionCodecPreference, value: value);
+                                    await bind.sessionPeerOption(
+                                        sessionId: sessionId,
+                                        name: kOptionCodecPreference,
+                                        value: value);
+                                    bind.sessionChangePreferCodec(
+                                        sessionId: sessionId);
+                                  },
+                                ),
+                              if (availableCodecs['h264'] == true)
+                                buildRadio<String>(
+                                  value: 'h264',
+                                  groupValue: codecValue,
+                                  label: 'H264',
+                                  onChanged: (value) async {
+                                    setDialogState(() => codecValue = value);
+                                    bind.mainSetUserDefaultOption(
+                                        key: kOptionCodecPreference, value: value);
+                                    await bind.sessionPeerOption(
+                                        sessionId: sessionId,
+                                        name: kOptionCodecPreference,
+                                        value: value);
+                                    bind.sessionChangePreferCodec(
+                                        sessionId: sessionId);
+                                  },
+                                ),
+                              if (availableCodecs['h265'] == true)
+                                buildRadio<String>(
+                                  value: 'h265',
+                                  groupValue: codecValue,
+                                  label: 'H265',
+                                  onChanged: (value) async {
+                                    setDialogState(() => codecValue = value);
+                                    bind.mainSetUserDefaultOption(
+                                        key: kOptionCodecPreference, value: value);
+                                    await bind.sessionPeerOption(
+                                        sessionId: sessionId,
+                                        name: kOptionCodecPreference,
+                                        value: value);
+                                    bind.sessionChangePreferCodec(
+                                        sessionId: sessionId);
+                                  },
+                                ),
+                            ],
+                          ),
+
+                          // 트랙패드 속도
+                          buildCard(
+                            title: 'Trackpad speed',
+                            children: [
+                              Padding(
+                                padding:
+                                    const EdgeInsets.fromLTRB(16, 8, 16, 0),
+                                child: Row(
+                                  children: [
+                                    Expanded(
+                                      child: Slider(
+                                        value: trackpadSpeedValue.toDouble(),
+                                        min: kMinTrackpadSpeed.toDouble(),
+                                        max: kMaxTrackpadSpeed.toDouble(),
+                                        activeColor: accentColor,
+                                        onChanged: (value) async {
+                                          setDialogState(() =>
+                                              trackpadSpeedValue =
+                                                  value.toInt());
+                                          // 사용자 기본 설정에 저장
+                                          bind.mainSetUserDefaultOption(
+                                              key: kKeyTrackpadSpeed,
+                                              value: value.toInt().toString());
+                                          // 현재 세션에도 적용
+                                          await bind.sessionSetTrackpadSpeed(
+                                              sessionId: sessionId,
+                                              value: value.toInt());
+                                          ffi.inputModel.updateTrackpadSpeed();
+                                        },
+                                      ),
+                                    ),
+                                    SizedBox(
+                                      width: 50,
+                                      child: Text(
+                                        '$trackpadSpeedValue%',
+                                        style: const TextStyle(
+                                            fontSize: 13, color: textColor),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ],
+                          ),
+
+                          // 기타 옵션 (공통 정의 사용)
+                          buildCard(
+                            title: 'Other Default Options',
+                            children: displayOptions.map((opt) {
+                              return buildCheckbox(
+                                optionKey: opt.optionKey,
+                                label: opt.label,
+                                value: otherOptions[opt.optionKey] ?? false,
+                                onChanged: (value) async {
+                                  setDialogState(() =>
+                                      otherOptions[opt.optionKey] = value);
+                                  // 보기 모드는 특별 처리 (세션 옵션이므로 user default 저장 안함)
+                                  if (opt.optionKey == kOptionViewOnly) {
+                                    await bind.sessionToggleOption(
+                                        sessionId: sessionId,
+                                        value: opt.toggleKey);
+                                    ffi.ffiModel.setViewOnly(widget.id, value);
+                                  } else {
+                                    bind.mainSetUserDefaultOption(
+                                        key: opt.optionKey,
+                                        value: value ? 'Y' : '');
+                                    await bind.sessionToggleOption(
+                                        sessionId: sessionId,
+                                        value: opt.toggleKey);
+                                  }
+                                },
+                              );
+                            }).toList(),
+                          ),
+                          const SizedBox(height: 8),
+                        ],
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            );
+          },
+        ),
+        actions: [
+          StyledPrimaryButton(
+            label: translate('Close'),
+            onPressed: close,
+            height: 44,
+          ),
+        ],
+      );
+    });
+  }
+
+  // 원격 다시시작
+  void _restartRemote() {
+    showRestartRemoteDevice(
+        pi, widget.id, widget.ffi.sessionId, widget.ffi.dialogManager);
+  }
+
+  // 원격 종료
+  void _shutdownRemote() {
+    // 확인 다이얼로그 표시
+    widget.ffi.dialogManager.show((setState, close, context) {
+      return CustomAlertDialog(
+        title: Text(
+          translate('Shutdown Remote'),
+          style: const TextStyle(
+            fontSize: 18,
+            fontWeight: FontWeight.bold,
+          ),
+        ),
+        content: Text(
+          translate('Would you like to study remotely?'),
+          style: const TextStyle(fontSize: 14),
+        ),
+        actions: [
+          Row(
+            children: [
+              Expanded(
+                child: StyledOutlinedButton(
+                  label: translate('Cancel'),
+                  onPressed: close,
+                  padding: const EdgeInsets.symmetric(vertical: 14),
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: ElevatedButton(
+                  onPressed: () {
+                    close();
+                    // 원격 연결 종료 및 탭 닫기
+                    closeConnection(id: widget.id);
+                  },
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: MyTheme.accent,
+                    padding: const EdgeInsets.symmetric(vertical: 14),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                  ),
+                  child: Text(
+                    translate('OK'),
+                    style: const TextStyle(color: Colors.white, fontSize: 16),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ],
+      );
+    });
   }
 
   ThemeData themeData() {
@@ -838,8 +1865,8 @@ class ScreenAdjustor {
   }
 
   _getScreenInfoDesktop() async {
-    final v = await rustDeskWinManager.call(
-        WindowType.Main, kWindowGetWindowInfo, '');
+    final v =
+        await oneDeskWinManager.call(WindowType.Main, kWindowGetWindowInfo, '');
     return v.result;
   }
 
@@ -1286,6 +2313,7 @@ class _CustomScaleMenuControlsState
         child: Row(children: [
           Tooltip(
             message: translate('Decrease'),
+            waitDuration: Duration.zero,
             child: IconButton(
               iconSize: 16,
               padding: EdgeInsets.all(1),
@@ -1297,6 +2325,7 @@ class _CustomScaleMenuControlsState
           Expanded(child: sliderControl),
           Tooltip(
             message: translate('Increase'),
+            waitDuration: Duration.zero,
             child: IconButton(
               iconSize: 16,
               padding: EdgeInsets.all(1),
@@ -2122,8 +3151,8 @@ class _VoiceCallMenu extends StatelessWidget {
       assetName: "assets/call_wait.svg",
       tooltip: "Waiting",
       onPressed: () => bind.sessionCloseVoiceCall(sessionId: ffi.sessionId),
-      color: _ToolbarTheme.redColor,
-      hoverColor: _ToolbarTheme.hoverRedColor,
+      color: _ToolbarTheme.orangeColor,
+      hoverColor: _ToolbarTheme.hoverOrangeColor,
     );
   }
 }
@@ -2233,6 +3262,7 @@ class _IconMenuButtonState extends State<_IconMenuButton> {
           onPressed: widget.onPressed,
           child: Tooltip(
             message: translate(widget.tooltip),
+            waitDuration: Duration.zero,
             child: Material(
                 type: MaterialType.transparency,
                 child: Ink(
@@ -2248,6 +3278,7 @@ class _IconMenuButtonState extends State<_IconMenuButton> {
         vertical: widget.vMargin ?? _ToolbarTheme.buttonVMargin);
     button = Tooltip(
       message: widget.tooltip,
+      waitDuration: Duration.zero,
       child: button,
     );
     if (widget.topLevel) {
@@ -2307,7 +3338,9 @@ class _IconSubmenuButtonState extends State<_IconSubmenuButton> {
     final button = SizedBox(
         width: widget.width ?? _ToolbarTheme.buttonSize,
         height: _ToolbarTheme.buttonSize,
-        child: SubmenuButton(
+        child: TooltipVisibility(
+          visible: false,
+          child: SubmenuButton(
             menuStyle:
                 widget.menuStyle ?? _ToolbarTheme.defaultMenuStyle(context),
             style: _ToolbarTheme.defaultMenuButtonStyle,
@@ -2316,6 +3349,7 @@ class _IconSubmenuButtonState extends State<_IconSubmenuButton> {
                 }),
             child: Tooltip(
                 message: translate(widget.tooltip),
+                waitDuration: Duration.zero,
                 child: Material(
                     type: MaterialType.transparency,
                     child: Ink(
@@ -2328,7 +3362,7 @@ class _IconSubmenuButtonState extends State<_IconSubmenuButton> {
             menuChildren: widget
                 .menuChildrenGetter(this)
                 .map((e) => _buildPointerTrackWidget(e, widget.ffi))
-                .toList()));
+                .toList())));
     return MenuBar(children: [
       button.marginSymmetric(
           horizontal: _ToolbarTheme.buttonHMargin,
@@ -2350,12 +3384,15 @@ class _SubmenuButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return SubmenuButton(
-      key: key,
-      child: child,
-      menuChildren:
-          menuChildren.map((e) => _buildPointerTrackWidget(e, ffi)).toList(),
-      menuStyle: _ToolbarTheme.defaultMenuStyle(context),
+    return TooltipVisibility(
+      visible: false,
+      child: SubmenuButton(
+        key: key,
+        child: child,
+        menuChildren:
+            menuChildren.map((e) => _buildPointerTrackWidget(e, ffi)).toList(),
+        menuStyle: _ToolbarTheme.defaultMenuStyle(context),
+      ),
     );
   }
 }
@@ -2590,6 +3627,7 @@ class _DraggableShowHideState extends State<_DraggableShowHide> {
               Tooltip(
                 message: translate(
                     isFullscreen.isTrue ? 'Exit Fullscreen' : 'Fullscreen'),
+                waitDuration: Duration.zero,
                 child: Icon(
                   isFullscreen.isTrue
                       ? Icons.fullscreen_exit
@@ -2605,6 +3643,7 @@ class _DraggableShowHideState extends State<_DraggableShowHide> {
                   widget.setMinimize,
                   Tooltip(
                     message: translate('Minimize'),
+                    waitDuration: Duration.zero,
                     child: Icon(
                       Icons.remove,
                       size: iconSize,
@@ -2619,6 +3658,7 @@ class _DraggableShowHideState extends State<_DraggableShowHide> {
           Obx((() => Tooltip(
                 message:
                     translate(show.isTrue ? 'Hide Toolbar' : 'Show Toolbar'),
+                waitDuration: Duration.zero,
                 child: Icon(
                   show.isTrue ? Icons.expand_less : Icons.expand_more,
                   size: iconSize,
@@ -2634,6 +3674,7 @@ class _DraggableShowHideState extends State<_DraggableShowHide> {
                 () => closeConnection(id: widget.id),
                 Tooltip(
                   message: translate('Close'),
+                  waitDuration: Duration.zero,
                   child: Icon(
                     Icons.close,
                     size: iconSize,
@@ -2650,11 +3691,7 @@ class _DraggableShowHideState extends State<_DraggableShowHide> {
       data: TextButtonThemeData(style: buttonStyle),
       child: Container(
         decoration: BoxDecoration(
-          color: Theme.of(context)
-              .menuBarTheme
-              .style
-              ?.backgroundColor
-              ?.resolve(MaterialState.values.toSet()),
+          color: const Color(0xFFFEFEFE),
           border: Border.all(
             color: _ToolbarTheme.borderColor(context),
             width: 1,
@@ -2740,5 +3777,275 @@ class EdgeThicknessControl extends StatelessWidget {
     );
 
     return slider;
+  }
+}
+
+/// 팝업 메뉴 아이템 데이터 클래스
+class _PopupMenuItem {
+  final String? assetPath;
+  final String text;
+  final VoidCallback onTap;
+  final Color? iconColor;
+
+  _PopupMenuItem({
+    this.assetPath,
+    required this.text,
+    required this.onTap,
+    this.iconColor,
+  });
+}
+
+/// 커스텀 툴바 버튼
+class _CustomToolbarButton extends StatefulWidget {
+  final String assetName;
+  final String tooltip;
+  final VoidCallback onPressed;
+  final bool isPressed;
+  final Color? backgroundColor;
+  final Color? iconColor;
+
+  const _CustomToolbarButton({
+    Key? key,
+    required this.assetName,
+    required this.tooltip,
+    required this.onPressed,
+    this.isPressed = false,
+    this.backgroundColor,
+    this.iconColor,
+  }) : super(key: key);
+
+  @override
+  State<_CustomToolbarButton> createState() => _CustomToolbarButtonState();
+}
+
+class _CustomToolbarButtonState extends State<_CustomToolbarButton> {
+  bool _isHovered = false;
+
+  @override
+  Widget build(BuildContext context) {
+    return MouseRegion(
+      cursor: SystemMouseCursors.click,
+      onEnter: (_) => setState(() => _isHovered = true),
+      onExit: (_) => setState(() => _isHovered = false),
+      child: Tooltip(
+        message: widget.tooltip,
+        waitDuration: Duration.zero,
+        child: GestureDetector(
+          onTap: () {
+            widget.onPressed();
+          },
+          child: Container(
+            width: 36,
+            height: 36,
+            decoration: BoxDecoration(
+              color: widget.backgroundColor != null
+                  ? (widget.isPressed
+                      ? widget.backgroundColor!.withOpacity(0.8)
+                      : (_isHovered
+                          ? widget.backgroundColor!.withOpacity(0.9)
+                          : widget.backgroundColor))
+                  : (widget.isPressed
+                      ? MyTheme.accent.withOpacity(0.2)
+                      : (_isHovered ? Colors.grey[100] : Colors.transparent)),
+              borderRadius: BorderRadius.circular(6),
+              border: widget.isPressed
+                  ? Border.all(color: MyTheme.accent, width: 1.5)
+                  : null,
+            ),
+            child: Center(
+              child: SvgPicture.asset(
+                widget.assetName,
+                width: 20,
+                height: 20,
+                colorFilter: svgColor(
+                  widget.iconColor ??
+                      (widget.isPressed ? MyTheme.accent : Colors.grey[700]!),
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// 접혔을 때 표시되는 미니 툴바
+class _MiniToolbar extends StatefulWidget {
+  final RxBool show;
+  final RxDouble fractionX;
+  final RxBool dragging;
+  final SessionID sessionId;
+  final BorderRadius borderRadius;
+
+  const _MiniToolbar({
+    Key? key,
+    required this.show,
+    required this.fractionX,
+    required this.dragging,
+    required this.sessionId,
+    required this.borderRadius,
+  }) : super(key: key);
+
+  @override
+  State<_MiniToolbar> createState() => _MiniToolbarState();
+}
+
+class _MiniToolbarState extends State<_MiniToolbar> {
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: () => widget.show.value = true,
+      child: MouseRegion(
+        cursor: SystemMouseCursors.click,
+        child: SvgPicture.asset(
+          'assets/icons/remote_mini.svg',
+          width: 20,
+          height: 20,
+          colorFilter:
+              const ColorFilter.mode(Color(0xFFFEFEFE), BlendMode.srcIn),
+        ),
+      ),
+    );
+  }
+}
+
+/// 커스텀 툴바 팝업 메뉴 버튼
+class _CustomToolbarPopupMenu extends StatefulWidget {
+  final String assetName;
+  final String tooltip;
+  final List<_PopupMenuItem> menuItems;
+
+  const _CustomToolbarPopupMenu({
+    Key? key,
+    required this.assetName,
+    required this.tooltip,
+    required this.menuItems,
+  }) : super(key: key);
+
+  @override
+  State<_CustomToolbarPopupMenu> createState() =>
+      _CustomToolbarPopupMenuState();
+}
+
+class _CustomToolbarPopupMenuState extends State<_CustomToolbarPopupMenu> {
+  bool _isHovered = false;
+
+  @override
+  Widget build(BuildContext context) {
+    return MouseRegion(
+      cursor: SystemMouseCursors.click,
+      onEnter: (_) => setState(() => _isHovered = true),
+      onExit: (_) => setState(() => _isHovered = false),
+      child: Tooltip(
+        message: widget.tooltip,
+        waitDuration: Duration.zero,
+        child: Theme(
+          data: Theme.of(context).copyWith(
+            splashColor: Colors.transparent,
+            highlightColor: Colors.transparent,
+            hoverColor: Colors.transparent,
+          ),
+          child: PopupMenuButton<int>(
+            tooltip: '', // 기본 "메뉴 표시" 툴팁 비활성화 (외부 Tooltip 사용)
+            onSelected: (index) {
+              if (index >= 0 && index < widget.menuItems.length) {
+                widget.menuItems[index].onTap();
+              }
+            },
+            offset: Offset(0, 40),
+            shape:
+                RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+            itemBuilder: (context) =>
+                widget.menuItems.asMap().entries.map((entry) {
+              final index = entry.key;
+              final item = entry.value;
+              return PopupMenuItem<int>(
+                value: index,
+                height: 40,
+                padding: EdgeInsets.zero,
+                mouseCursor: SystemMouseCursors.click,
+                child: _HoverMenuItem(
+                  assetPath: item.assetPath,
+                  text: item.text,
+                  iconColor: item.iconColor,
+                ),
+              );
+            }).toList(),
+            child: Container(
+              width: 36,
+              height: 36,
+              decoration: BoxDecoration(
+                color: _isHovered ? Colors.grey[100] : Colors.transparent,
+                borderRadius: BorderRadius.circular(6),
+              ),
+              child: Center(
+                child: SvgPicture.asset(
+                  widget.assetName,
+                  width: 20,
+                  height: 20,
+                  colorFilter: svgColor(Colors.grey[700]!),
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// 2차 메뉴 아이템 호버 효과 위젯
+class _HoverMenuItem extends StatefulWidget {
+  final String? assetPath;
+  final String text;
+  final Color? iconColor;
+
+  const _HoverMenuItem({
+    Key? key,
+    this.assetPath,
+    required this.text,
+    this.iconColor,
+  }) : super(key: key);
+
+  @override
+  State<_HoverMenuItem> createState() => _HoverMenuItemState();
+}
+
+class _HoverMenuItemState extends State<_HoverMenuItem> {
+  bool _isHovered = false;
+
+  @override
+  Widget build(BuildContext context) {
+    return MouseRegion(
+      onEnter: (_) => setState(() => _isHovered = true),
+      onExit: (_) => setState(() => _isHovered = false),
+      child: Container(
+        margin: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        decoration: BoxDecoration(
+          color: _isHovered ? const Color(0xFFEFF1FF) : Colors.transparent,
+          border: _isHovered
+              ? Border.all(color: const Color(0xFFCDD3FF), width: 1)
+              : Border.all(color: Colors.transparent, width: 1),
+          borderRadius: BorderRadius.circular(8),
+        ),
+        child: Row(
+          children: [
+            if (widget.assetPath != null) ...[
+              SvgPicture.asset(
+                widget.assetPath!,
+                width: 20,
+                height: 20,
+                colorFilter: svgColor(widget.iconColor ?? Colors.grey[700]!),
+              ),
+              const SizedBox(width: 8),
+            ],
+            Text(widget.text,
+                style: TextStyle(fontSize: 13, color: widget.iconColor)),
+          ],
+        ),
+      ),
+    );
   }
 }

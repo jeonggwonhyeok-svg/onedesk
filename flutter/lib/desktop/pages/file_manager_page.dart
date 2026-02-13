@@ -4,7 +4,8 @@ import 'dart:math';
 
 import 'package:extended_text/extended_text.dart';
 import 'package:flutter_hbb/common/widgets/dialog.dart';
-import 'package:flutter_hbb/desktop/widgets/dragable_divider.dart';
+import 'package:flutter_hbb/common/widgets/styled_form_widgets.dart';
+import 'package:flutter_hbb/common/widgets/styled_text_field.dart';
 import 'package:percent_indicator/percent_indicator.dart';
 import 'package:desktop_drop/desktop_drop.dart';
 import 'package:flutter/gestures.dart';
@@ -179,6 +180,11 @@ class _FileManagerPageState extends State<FileManagerPage>
                   flex: 3,
                   child: dropArea(FileManagerView(
                       model.remoteController, _ffi, _mouseFocusScope))),
+              Container(
+                width: 1,
+                margin: const EdgeInsets.symmetric(vertical: 16.0),
+                color: const Color(0xFFDEDEE2),
+              ),
               Flexible(flex: 2, child: statusList())
             ],
           ),
@@ -203,10 +209,11 @@ class _FileManagerPageState extends State<FileManagerPage>
   Widget generateCard(Widget child) {
     return Container(
       decoration: BoxDecoration(
-        color: Theme.of(context).cardColor,
+        color: const Color(0xFFFEFEFE),
         borderRadius: BorderRadius.all(
-          Radius.circular(15.0),
+          Radius.circular(16.0),
         ),
+        border: Border.all(color: const Color(0xFFF2F1F6)),
       ),
       child: child,
     );
@@ -216,23 +223,32 @@ class _FileManagerPageState extends State<FileManagerPage>
   /// watch transfer status
   Widget statusList() {
     Widget getIcon(JobProgress job) {
-      final color = Theme.of(context).tabBarTheme.labelColor;
+      const iconColor = Color(0xFF94A0FF);
+      String iconPath;
       switch (job.type) {
         case JobType.deleteDir:
         case JobType.deleteFile:
-          return Icon(Icons.delete_outline, color: color);
+          iconPath = "assets/icons/file-sender-delete.svg";
+          break;
         default:
-          return Transform.rotate(
-            angle: isWeb
-                ? job.isRemoteToLocal
-                    ? pi / 2
-                    : pi / 2 * 3
-                : job.isRemoteToLocal
-                    ? pi
-                    : 0,
-            child: Icon(Icons.arrow_forward_ios, color: color),
-          );
+          iconPath = "assets/icons/file-sender-file.svg";
       }
+      return Container(
+        width: 52,
+        height: 52,
+        decoration: BoxDecoration(
+          color: const Color(0xFFEFF1FF),
+          borderRadius: BorderRadius.circular(8),
+        ),
+        child: Center(
+          child: SvgPicture.asset(
+            iconPath,
+            width: 24,
+            height: 24,
+            colorFilter: svgColor(iconColor),
+          ),
+        ),
+      );
     }
 
     statusListView(List<JobProgress> jobs) => ListView.builder(
@@ -258,9 +274,13 @@ class _FileManagerPageState extends State<FileManagerPage>
                             children: [
                               Tooltip(
                                 waitDuration: Duration(milliseconds: 500),
-                                message: item.jobName,
+                                message: item.state == JobState.done && item.to.isNotEmpty
+                                    ? item.to
+                                    : item.jobName,
                                 child: ExtendedText(
-                                  item.jobName,
+                                  item.state == JobState.done && item.to.isNotEmpty
+                                      ? item.to
+                                      : item.jobName,
                                   maxLines: 1,
                                   overflow: TextOverflow.ellipsis,
                                   overflowWidget: TextOverflowWidget(
@@ -306,25 +326,18 @@ class _FileManagerPageState extends State<FileManagerPage>
                                   jobController.resumeJob(item.id);
                                 },
                                 child: SvgPicture.asset(
-                                  "assets/refresh.svg",
+                                  "assets/icons/file-sender-refresh.svg",
                                   colorFilter: svgColor(Colors.white),
                                 ),
                                 color: MyTheme.accent,
                                 hoverColor: MyTheme.accent80,
                               ),
                             ),
-                            MenuButton(
-                              tooltip: translate("Delete"),
-                              child: SvgPicture.asset(
-                                "assets/close.svg",
-                                colorFilter: svgColor(Colors.white),
-                              ),
+                            _JobDeleteButton(
                               onPressed: () {
                                 jobController.jobTable.removeAt(index);
                                 jobController.cancelJob(item.id);
                               },
-                              color: MyTheme.accent,
-                              hoverColor: MyTheme.accent80,
                             ),
                           ],
                         ).marginAll(12),
@@ -341,30 +354,17 @@ class _FileManagerPageState extends State<FileManagerPage>
     return PreferredSize(
       preferredSize: const Size(200, double.infinity),
       child: Container(
-          margin: const EdgeInsets.only(top: 16.0, bottom: 16.0, right: 16.0),
-          padding: const EdgeInsets.all(8.0),
+          padding: const EdgeInsets.all(16.0),
+          color: const Color(0xFFF7F7F7),
           child: Obx(
             () => jobController.jobTable.isEmpty
-                ? generateCard(
-                    Center(
-                      child: Column(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          SvgPicture.asset(
-                            "assets/transfer.svg",
-                            colorFilter: svgColor(
-                                Theme.of(context).tabBarTheme.labelColor),
-                            height: 40,
-                          ).paddingOnly(bottom: 10),
-                          Text(
-                            translate("No transfers in progress"),
-                            textAlign: TextAlign.center,
-                            textScaler: TextScaler.linear(1.20),
-                            style: TextStyle(
-                                color:
-                                    Theme.of(context).tabBarTheme.labelColor),
-                          ),
-                        ],
+                ? Center(
+                    child: Text(
+                      translate("No transfers in progress"),
+                      textAlign: TextAlign.center,
+                      style: TextStyle(
+                        fontSize: 16,
+                        color: Theme.of(context).tabBarTheme.labelColor,
                       ),
                     ),
                   )
@@ -415,6 +415,7 @@ class _FileManagerViewState extends State<FileManagerView> {
   final _sizeColWidth = 0.0.obs;
   final _fileListScrollController = ScrollController();
   final _globalHeaderKey = GlobalKey();
+  final _locationTextController = TextEditingController();
 
   /// [_lastClickTime], [_lastClickEntry] help to handle double click
   var _lastClickTime =
@@ -422,7 +423,6 @@ class _FileManagerViewState extends State<FileManagerView> {
   Entry? _lastClickEntry;
 
   double? _windowWidthPrev;
-  double _fileTransferMinimumWidth = 0.0;
 
   FileController get controller => widget.controller;
   bool get isLocal => widget.controller.isLocal;
@@ -444,6 +444,7 @@ class _FileManagerViewState extends State<FileManagerView> {
     _keyboardNode.dispose();
     _breadCrumbScroller.dispose();
     _fileListScrollController.dispose();
+    _locationTextController.dispose();
     super.dispose();
   }
 
@@ -453,6 +454,10 @@ class _FileManagerViewState extends State<FileManagerView> {
     return Container(
       margin: const EdgeInsets.all(16.0),
       padding: const EdgeInsets.all(8.0),
+      decoration: BoxDecoration(
+        color: Color(0xFFFFFFFF),
+        borderRadius: BorderRadius.circular(12),
+      ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -486,7 +491,6 @@ class _FileManagerViewState extends State<FileManagerView> {
     if (_windowWidthPrev == null) {
       _windowWidthPrev = windowWidthNow;
       final defaultColumnWidth = windowWidthNow * 0.115;
-      _fileTransferMinimumWidth = defaultColumnWidth / 3;
       _nameColWidth.value = defaultColumnWidth;
       _modifiedColWidth.value = defaultColumnWidth;
       _sizeColWidth.value = defaultColumnWidth;
@@ -495,7 +499,6 @@ class _FileManagerViewState extends State<FileManagerView> {
     if (_windowWidthPrev != windowWidthNow) {
       final difference = windowWidthNow / _windowWidthPrev!;
       _windowWidthPrev = windowWidthNow;
-      _fileTransferMinimumWidth *= difference;
       _nameColWidth.value *= difference;
       _modifiedColWidth.value *= difference;
       _sizeColWidth.value *= difference;
@@ -527,187 +530,157 @@ class _FileManagerViewState extends State<FileManagerView> {
                     crossAxisAlignment: CrossAxisAlignment.center,
                     children: [
                       Container(
-                          width: 50,
-                          height: 50,
+                          width: 80,
+                          height: 80,
                           decoration: BoxDecoration(
-                            borderRadius: BorderRadius.all(Radius.circular(8)),
-                            color: MyTheme.accent,
+                            borderRadius: BorderRadius.all(Radius.circular(16)),
+                            color: Color(0xFFEFF1FF),
                           ),
-                          padding: EdgeInsets.all(8.0),
-                          child: FutureBuilder<String>(
-                              future: bind.sessionGetPlatform(
-                                  sessionId: _ffi.sessionId,
-                                  isRemote: !isLocal),
-                              builder: (context, snapshot) {
-                                if (snapshot.hasData &&
-                                    snapshot.data!.isNotEmpty) {
-                                  return getPlatformImage('${snapshot.data}');
-                                } else {
-                                  return CircularProgressIndicator(
-                                    color: Theme.of(context)
-                                        .tabBarTheme
-                                        .labelColor,
-                                  );
-                                }
-                              })),
-                      Text(isLocal
-                              ? translate("Local Computer")
-                              : translate("Remote Computer"))
-                          .marginOnly(left: 8.0)
-                    ],
-                  ),
-                  preferredSize: Size(double.infinity, 70))
-              .paddingOnly(bottom: 15),
-          // buttons
-          Row(
-            children: [
-              Row(
-                children: [
-                  MenuButton(
-                    tooltip: translate('Back'),
-                    padding: EdgeInsets.only(
-                      right: 3,
-                    ),
-                    child: RotatedBox(
-                      quarterTurns: 2,
-                      child: SvgPicture.asset(
-                        "assets/arrow.svg",
-                        colorFilter:
-                            svgColor(Theme.of(context).tabBarTheme.labelColor),
-                      ),
-                    ),
-                    color: Theme.of(context).cardColor,
-                    hoverColor: Theme.of(context).hoverColor,
-                    onPressed: () {
-                      selectedItems.clear();
-                      controller.goBack();
-                    },
-                  ),
-                  MenuButton(
-                    tooltip: translate('Parent directory'),
-                    child: RotatedBox(
-                      quarterTurns: 3,
-                      child: SvgPicture.asset(
-                        "assets/arrow.svg",
-                        colorFilter:
-                            svgColor(Theme.of(context).tabBarTheme.labelColor),
-                      ),
-                    ),
-                    color: Theme.of(context).cardColor,
-                    hoverColor: Theme.of(context).hoverColor,
-                    onPressed: () {
-                      selectedItems.clear();
-                      controller.goToParentDirectory();
-                    },
-                  ),
-                ],
-              ),
-              Expanded(
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 3.0),
-                  child: Container(
-                    decoration: BoxDecoration(
-                      color: Theme.of(context).cardColor,
-                      borderRadius: BorderRadius.all(
-                        Radius.circular(8.0),
-                      ),
-                    ),
-                    child: Padding(
-                      padding: EdgeInsets.symmetric(vertical: 2.5),
-                      child: GestureDetector(
-                        onTap: () {
-                          _locationStatus.value =
-                              _locationStatus.value == LocationStatus.bread
-                                  ? LocationStatus.pathLocation
-                                  : LocationStatus.bread;
-                          Future.delayed(Duration.zero, () {
-                            if (_locationStatus.value ==
-                                LocationStatus.pathLocation) {
-                              _locationNode.requestFocus();
-                            }
-                          });
-                        },
-                        child: Obx(
-                          () => Container(
-                            child: Row(
-                              children: [
-                                Expanded(
-                                    child: _locationStatus.value ==
-                                            LocationStatus.bread
-                                        ? buildBread()
-                                        : buildPathLocation()),
-                              ],
+                          child: Center(
+                            child: FutureBuilder<String>(
+                                future: bind.sessionGetPlatform(
+                                    sessionId: _ffi.sessionId,
+                                    isRemote: !isLocal),
+                                builder: (context, snapshot) {
+                                  if (snapshot.hasData &&
+                                      snapshot.data!.isNotEmpty) {
+                                    return getPlatformImage('${snapshot.data}',
+                                        size: 24, color: Color(0xFF5F71FF));
+                                  } else {
+                                    return CircularProgressIndicator(
+                                      color: Color(0xFF5F71FF),
+                                    );
+                                  }
+                                }),
+                          )),
+                      Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Text(
+                            isLocal
+                                ? translate("Local Computer")
+                                : translate("Remote Computer"),
+                            style: TextStyle(
+                              fontSize: 16,
+                              fontWeight: FontWeight.w600,
                             ),
                           ),
+                          SizedBox(height: 4),
+                          Text(
+                            isLocal
+                                ? translate("My Computer")
+                                : translate("Partner Computer"),
+                            style: TextStyle(
+                              fontSize: 13,
+                              color: MyTheme.darkGray,
+                            ),
+                          ),
+                        ],
+                      ).marginOnly(left: 12.0)
+                    ],
+                  ),
+                  preferredSize: Size(double.infinity, 100))
+              .paddingOnly(bottom: 15),
+          // buttons - 경로 바
+          SizedBox(
+            height: 43,
+            child: Row(
+              children: [
+                // Back button (file_arrow 180도 회전)
+                _NavIconButton(
+                  tooltip: translate('Back'),
+                  iconPath: "assets/icons/file_arrow.svg",
+                  rotationAngle: 180,
+                  onPressed: () {
+                    selectedItems.clear();
+                    controller.goBack();
+                  },
+                ),
+                // Parent directory button (file_arrow -90도 회전)
+                _NavIconButton(
+                  tooltip: translate('Parent directory'),
+                  iconPath: "assets/icons/file_arrow.svg",
+                  rotationAngle: -90,
+                  onPressed: () {
+                    selectedItems.clear();
+                    controller.goToParentDirectory();
+                  },
+                ),
+                // Path bar (보더 적용)
+                Expanded(
+                  child: Container(
+                    height: 43,
+                    decoration: BoxDecoration(
+                      border: Border.all(color: const Color(0xFFB9B8BF)),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: GestureDetector(
+                      onTap: () {
+                        _locationStatus.value =
+                            _locationStatus.value == LocationStatus.bread
+                                ? LocationStatus.pathLocation
+                                : LocationStatus.bread;
+                        Future.delayed(Duration.zero, () {
+                          if (_locationStatus.value ==
+                              LocationStatus.pathLocation) {
+                            _locationNode.requestFocus();
+                          }
+                        });
+                      },
+                      child: Obx(
+                        () => Row(
+                          crossAxisAlignment: CrossAxisAlignment.center,
+                          children: [
+                            Expanded(
+                                child: _locationStatus.value ==
+                                        LocationStatus.bread
+                                    ? buildBread()
+                                    : buildPathLocation()),
+                          ],
                         ),
                       ),
                     ),
                   ),
                 ),
-              ),
-              Obx(() {
-                switch (_locationStatus.value) {
-                  case LocationStatus.bread:
-                    return MenuButton(
-                      tooltip: translate('Search'),
-                      onPressed: () {
-                        _locationStatus.value = LocationStatus.fileSearchBar;
-                        Future.delayed(
-                            Duration.zero, () => _locationNode.requestFocus());
-                      },
-                      child: SvgPicture.asset(
-                        "assets/search.svg",
-                        colorFilter:
-                            svgColor(Theme.of(context).tabBarTheme.labelColor),
-                      ),
-                      color: Theme.of(context).cardColor,
-                      hoverColor: Theme.of(context).hoverColor,
-                    );
-                  case LocationStatus.pathLocation:
-                    return MenuButton(
-                      onPressed: null,
-                      child: SvgPicture.asset(
-                        "assets/close.svg",
-                        colorFilter:
-                            svgColor(Theme.of(context).tabBarTheme.labelColor),
-                      ),
-                      color: Theme.of(context).disabledColor,
-                      hoverColor: Theme.of(context).hoverColor,
-                    );
-                  case LocationStatus.fileSearchBar:
-                    return MenuButton(
-                      tooltip: translate('Clear'),
-                      onPressed: () {
-                        onSearchText("", isLocal);
-                        _locationStatus.value = LocationStatus.bread;
-                      },
-                      child: SvgPicture.asset(
-                        "assets/close.svg",
-                        colorFilter:
-                            svgColor(Theme.of(context).tabBarTheme.labelColor),
-                      ),
-                      color: Theme.of(context).cardColor,
-                      hoverColor: Theme.of(context).hoverColor,
-                    );
-                }
-              }),
-              MenuButton(
-                tooltip: translate('Refresh File'),
-                padding: EdgeInsets.only(
-                  left: 3,
+                // Search/Close/Refresh buttons
+                Obx(() {
+                  switch (_locationStatus.value) {
+                    case LocationStatus.bread:
+                      return _NavIconButton(
+                        tooltip: translate('Search'),
+                        iconPath: "assets/icons/file-sender-search.svg",
+                        onPressed: () {
+                          _locationStatus.value = LocationStatus.fileSearchBar;
+                          Future.delayed(Duration.zero,
+                              () => _locationNode.requestFocus());
+                        },
+                      );
+                    case LocationStatus.pathLocation:
+                      return _NavIconButton(
+                        iconPath: "assets/icons/file-sender-close.svg",
+                        onPressed: null,
+                      );
+                    case LocationStatus.fileSearchBar:
+                      return _NavIconButton(
+                        tooltip: translate('Clear'),
+                        iconPath: "assets/icons/file-sender-close.svg",
+                        onPressed: () {
+                          onSearchText("", isLocal);
+                          _locationStatus.value = LocationStatus.bread;
+                        },
+                      );
+                  }
+                }),
+                _NavIconButton(
+                  tooltip: translate('Refresh File'),
+                  iconPath: "assets/icons/file-sender-refresh.svg",
+                  onPressed: () {
+                    controller.refresh();
+                  },
                 ),
-                onPressed: () {
-                  controller.refresh();
-                },
-                child: SvgPicture.asset(
-                  "assets/refresh.svg",
-                  colorFilter:
-                      svgColor(Theme.of(context).tabBarTheme.labelColor),
-                ),
-                color: Theme.of(context).cardColor,
-                hoverColor: Theme.of(context).hoverColor,
-              ),
-            ],
+              ],
+            ),
           ),
           Row(
             textDirection: isLocal ? TextDirection.ltr : TextDirection.rtl,
@@ -717,24 +690,16 @@ class _FileManagerViewState extends State<FileManagerView> {
                   mainAxisAlignment:
                       isLocal ? MainAxisAlignment.start : MainAxisAlignment.end,
                   children: [
-                    MenuButton(
+                    _NavIconButton(
                       tooltip: translate('Home'),
-                      padding: EdgeInsets.only(
-                        right: 3,
-                      ),
+                      iconPath: "assets/icons/file-sender-home.svg",
                       onPressed: () {
                         controller.goToHomeDirectory();
                       },
-                      child: SvgPicture.asset(
-                        "assets/home.svg",
-                        colorFilter:
-                            svgColor(Theme.of(context).tabBarTheme.labelColor),
-                      ),
-                      color: Theme.of(context).cardColor,
-                      hoverColor: Theme.of(context).hoverColor,
                     ),
-                    MenuButton(
+                    _NavIconButton(
                       tooltip: translate('Create Folder'),
+                      iconPath: "assets/icons/file-sender-folder-new.svg",
                       onPressed: () {
                         final name = TextEditingController();
                         String? errorText;
@@ -766,44 +731,39 @@ class _FileManagerViewState extends State<FileManagerView> {
 
                           cancel() => close(false);
                           return CustomAlertDialog(
-                            title: Row(
-                              mainAxisAlignment: MainAxisAlignment.center,
-                              children: [
-                                SvgPicture.asset("assets/folder_new.svg",
-                                    colorFilter: svgColor(MyTheme.accent)),
-                                Text(
-                                  translate("Create Folder"),
-                                ).paddingOnly(
-                                  left: 10,
-                                ),
-                              ],
+                            title: Text(
+                              translate("Create Folder"),
+                              style: MyTheme.dialogTitleStyle,
                             ),
                             content: Column(
                               mainAxisSize: MainAxisSize.min,
                               children: [
-                                TextFormField(
-                                  decoration: InputDecoration(
-                                    labelText: translate(
-                                      "Please enter the folder name",
-                                    ),
-                                    errorText: errorText,
-                                  ),
+                                StyledTextField(
                                   controller: name,
+                                  hintText:
+                                      translate("Please enter the folder name"),
+                                  errorText: errorText,
                                   autofocus: true,
-                                ).workaroundFreezeLinuxMint(),
+                                ),
                               ],
                             ),
                             actions: [
-                              dialogButton(
-                                "Cancel",
-                                icon: Icon(Icons.close_rounded),
-                                onPressed: cancel,
-                                isOutline: true,
-                              ),
-                              dialogButton(
-                                "Ok",
-                                icon: Icon(Icons.done_rounded),
-                                onPressed: submit,
+                              Row(
+                                children: [
+                                  Expanded(
+                                    child: StyledOutlinedButton(
+                                      label: translate("Cancel"),
+                                      onPressed: cancel,
+                                    ),
+                                  ),
+                                  const SizedBox(width: 12),
+                                  Expanded(
+                                    child: StyledPrimaryButton(
+                                      label: translate("OK"),
+                                      onPressed: submit,
+                                    ),
+                                  ),
+                                ],
                               ),
                             ],
                             onSubmit: submit,
@@ -811,16 +771,10 @@ class _FileManagerViewState extends State<FileManagerView> {
                           );
                         });
                       },
-                      child: SvgPicture.asset(
-                        "assets/folder_new.svg",
-                        colorFilter:
-                            svgColor(Theme.of(context).tabBarTheme.labelColor),
-                      ),
-                      color: Theme.of(context).cardColor,
-                      hoverColor: Theme.of(context).hoverColor,
                     ),
-                    Obx(() => MenuButton(
+                    Obx(() => _NavIconButton(
                           tooltip: translate('Delete'),
+                          iconPath: "assets/icons/file-sender-delete.svg",
                           onPressed: SelectedItems.valid(selectedItems.items)
                               ? () async {
                                   await (controller
@@ -828,13 +782,6 @@ class _FileManagerViewState extends State<FileManagerView> {
                                   selectedItems.clear();
                                 }
                               : null,
-                          child: SvgPicture.asset(
-                            "assets/trash.svg",
-                            colorFilter: svgColor(
-                                Theme.of(context).tabBarTheme.labelColor),
-                          ),
-                          color: Theme.of(context).cardColor,
-                          hoverColor: Theme.of(context).hoverColor,
                         )),
                     menu(isLocal: isLocal),
                   ],
@@ -843,11 +790,11 @@ class _FileManagerViewState extends State<FileManagerView> {
               if (isWeb)
                 Obx(() => ElevatedButton.icon(
                       style: ButtonStyle(
-                        padding: MaterialStateProperty.all<EdgeInsetsGeometry>(
+                        padding: WidgetStateProperty.all<EdgeInsetsGeometry>(
                             isLocal
                                 ? EdgeInsets.only(left: 10)
                                 : EdgeInsets.only(right: 10)),
-                        backgroundColor: MaterialStateProperty.all(
+                        backgroundColor: WidgetStateProperty.all(
                           selectedItems.items.isEmpty
                               ? MyTheme.accent80
                               : MyTheme.accent,
@@ -900,18 +847,11 @@ class _FileManagerViewState extends State<FileManagerView> {
                         ),
                       ).marginOnly(left: 8),
                     )).marginOnly(left: 16),
-              Obx(() => ElevatedButton.icon(
-                    style: ButtonStyle(
-                      padding: MaterialStateProperty.all<EdgeInsetsGeometry>(
-                          isLocal
-                              ? EdgeInsets.only(left: 10)
-                              : EdgeInsets.only(right: 10)),
-                      backgroundColor: MaterialStateProperty.all(
-                        selectedItems.items.isEmpty
-                            ? MyTheme.accent80
-                            : MyTheme.accent,
-                      ),
-                    ),
+              Obx(() => StyledCompactButton(
+                    label: translate(
+                        isLocal ? 'Send' : (isWeb ? 'Download' : 'Receive')),
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
                     onPressed: SelectedItems.valid(selectedItems.items)
                         ? () {
                             final otherSideData =
@@ -920,56 +860,6 @@ class _FileManagerViewState extends State<FileManagerView> {
                             selectedItems.clear();
                           }
                         : null,
-                    icon: isLocal
-                        ? Text(
-                            translate('Send'),
-                            textAlign: TextAlign.right,
-                            style: TextStyle(
-                              color: selectedItems.items.isEmpty
-                                  ? Theme.of(context).brightness ==
-                                          Brightness.light
-                                      ? MyTheme.grayBg
-                                      : MyTheme.darkGray
-                                  : Colors.white,
-                            ),
-                          )
-                        : isWeb
-                            ? Offstage()
-                            : RotatedBox(
-                                quarterTurns: 2,
-                                child: SvgPicture.asset(
-                                  "assets/arrow.svg",
-                                  colorFilter: svgColor(
-                                      selectedItems.items.isEmpty
-                                          ? Theme.of(context).brightness ==
-                                                  Brightness.light
-                                              ? MyTheme.grayBg
-                                              : MyTheme.darkGray
-                                          : Colors.white),
-                                  alignment: Alignment.bottomRight,
-                                ),
-                              ),
-                    label: isLocal
-                        ? SvgPicture.asset(
-                            "assets/arrow.svg",
-                            colorFilter: svgColor(selectedItems.items.isEmpty
-                                ? Theme.of(context).brightness ==
-                                        Brightness.light
-                                    ? MyTheme.grayBg
-                                    : MyTheme.darkGray
-                                : Colors.white),
-                          )
-                        : Text(
-                            translate(isWeb ? 'Download' : 'Receive'),
-                            style: TextStyle(
-                              color: selectedItems.items.isEmpty
-                                  ? Theme.of(context).brightness ==
-                                          Brightness.light
-                                      ? MyTheme.grayBg
-                                      : MyTheme.darkGray
-                                  : Colors.white,
-                            ),
-                          ),
                   )),
             ],
           ).marginOnly(top: 8.0)
@@ -1014,8 +904,9 @@ class _FileManagerViewState extends State<FileManagerView> {
         final y = e.position.dy;
         menuPos = RelativeRect.fromLTRB(x, y, x, y);
       },
-      child: MenuButton(
+      child: _NavIconButton(
         tooltip: translate('More'),
+        iconPath: "assets/icons/file-sender-edit-more.svg",
         onPressed: () => mod_menu.showMenu(
           context: context,
           position: menuPos,
@@ -1033,12 +924,6 @@ class _FileManagerViewState extends State<FileManagerView> {
               .toList(),
           elevation: 8,
         ),
-        child: SvgPicture.asset(
-          "assets/dots.svg",
-          colorFilter: svgColor(Theme.of(context).tabBarTheme.labelColor),
-        ),
-        color: Theme.of(context).cardColor,
-        hoverColor: Theme.of(context).hoverColor,
       ),
     );
   }
@@ -1154,133 +1039,137 @@ class _FileManagerViewState extends State<FileManagerView> {
                 details.globalPosition.dy);
           }
 
+          final isHovered = false.obs;
           return Padding(
-            padding: EdgeInsets.symmetric(vertical: 1),
-            child: Obx(() => Container(
-                decoration: BoxDecoration(
-                  color: selectedItems.items.contains(entry)
-                      ? MyTheme.button
-                      : Theme.of(context).cardColor,
-                  borderRadius: BorderRadius.all(
-                    Radius.circular(5.0),
-                  ),
-                  border: rightClickEntry.value == entry
-                      ? Border.all(
-                          color: MyTheme.button,
-                          width: 1.0,
-                        )
-                      : null,
-                ),
-                key: ValueKey(entry.name),
-                height: kDesktopFileTransferRowHeight,
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.spaceAround,
-                  children: [
-                    Expanded(
-                      child: InkWell(
-                        child: Row(
-                          children: [
-                            GestureDetector(
-                              child: Obx(
-                                () => Container(
-                                    width: _nameColWidth.value,
+            padding: const EdgeInsets.symmetric(vertical: 2, horizontal: 8),
+            child: MouseRegion(
+                cursor: SystemMouseCursors.click,
+                onEnter: (_) => isHovered.value = true,
+                onExit: (_) => isHovered.value = false,
+                child: Obx(() => Container(
+                    decoration: BoxDecoration(
+                      color: Colors.transparent,
+                      borderRadius: BorderRadius.all(
+                        Radius.circular(8.0),
+                      ),
+                      border: selectedItems.items.contains(entry) ||
+                              rightClickEntry.value == entry ||
+                              isHovered.value
+                          ? Border.all(
+                              color: const Color(0xFF5F71FF),
+                              width: 1.0,
+                            )
+                          : null,
+                    ),
+                    key: ValueKey(entry.name),
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.spaceAround,
+                      children: [
+                        Expanded(
+                          child: InkWell(
+                            mouseCursor: SystemMouseCursors.click,
+                            child: Row(
+                              children: [
+                                GestureDetector(
+                                  child: Obx(
+                                    () => Container(
+                                        width: _nameColWidth.value,
+                                        child: Tooltip(
+                                          waitDuration:
+                                              Duration(milliseconds: 500),
+                                          message: entry.name,
+                                          child: Row(children: [
+                                            const SizedBox(width: 8),
+                                            entry.isDrive
+                                                ? Image(
+                                                        image: iconHardDrive,
+                                                        fit: BoxFit.scaleDown,
+                                                        color: Theme.of(context)
+                                                            .iconTheme
+                                                            .color
+                                                            ?.withOpacity(0.7))
+                                                    .paddingAll(4)
+                                                : SvgPicture.asset(
+                                                    entry.isFile
+                                                        ? "assets/icons/file-sender-file.svg"
+                                                        : "assets/icons/file-sender-folder.svg",
+                                                    width: 16,
+                                                    height: 16,
+                                                    colorFilter: svgColor(
+                                                        const Color(
+                                                            0xFF8F8E95)),
+                                                  ),
+                                            const SizedBox(width: 8),
+                                            Expanded(
+                                                child: Text(
+                                                    entry.name.nonBreaking,
+                                                    style: const TextStyle(
+                                                        fontSize: 15,
+                                                        color:
+                                                            Color(0xFF646368)),
+                                                    overflow:
+                                                        TextOverflow.ellipsis))
+                                          ]),
+                                        )),
+                                  ),
+                                  onTap: onTap,
+                                  onSecondaryTap: onSecondaryTap,
+                                  onSecondaryTapDown: onSecondaryTapDown,
+                                ),
+                                SizedBox(
+                                  width: 2.0,
+                                ),
+                                GestureDetector(
+                                  child: Obx(
+                                    () => SizedBox(
+                                      width: _modifiedColWidth.value,
+                                      child: Tooltip(
+                                          waitDuration:
+                                              Duration(milliseconds: 500),
+                                          message: lastModifiedStr,
+                                          child: Text(
+                                            lastModifiedStr,
+                                            overflow: TextOverflow.ellipsis,
+                                            style: const TextStyle(
+                                              fontSize: 15,
+                                              color: Color(0xFF646368),
+                                            ),
+                                          )),
+                                    ),
+                                  ),
+                                  onTap: onTap,
+                                  onSecondaryTap: onSecondaryTap,
+                                  onSecondaryTapDown: onSecondaryTapDown,
+                                ),
+                                // Divider from header.
+                                SizedBox(
+                                  width: 2.0,
+                                ),
+                                Expanded(
+                                  // width: 100,
+                                  child: GestureDetector(
                                     child: Tooltip(
                                       waitDuration: Duration(milliseconds: 500),
-                                      message: entry.name,
-                                      child: Row(children: [
-                                        entry.isDrive
-                                            ? Image(
-                                                    image: iconHardDrive,
-                                                    fit: BoxFit.scaleDown,
-                                                    color: Theme.of(context)
-                                                        .iconTheme
-                                                        .color
-                                                        ?.withOpacity(0.7))
-                                                .paddingAll(4)
-                                            : SvgPicture.asset(
-                                                entry.isFile
-                                                    ? "assets/file.svg"
-                                                    : "assets/folder.svg",
-                                                colorFilter: svgColor(
-                                                    Theme.of(context)
-                                                        .tabBarTheme
-                                                        .labelColor),
-                                              ),
-                                        Expanded(
-                                            child: Text(entry.name.nonBreaking,
-                                                style: TextStyle(
-                                                    color: selectedItems.items
-                                                            .contains(entry)
-                                                        ? Colors.white
-                                                        : null),
-                                                overflow:
-                                                    TextOverflow.ellipsis))
-                                      ]),
-                                    )),
-                              ),
-                              onTap: onTap,
-                              onSecondaryTap: onSecondaryTap,
-                              onSecondaryTapDown: onSecondaryTapDown,
-                            ),
-                            SizedBox(
-                              width: 2.0,
-                            ),
-                            GestureDetector(
-                              child: Obx(
-                                () => SizedBox(
-                                  width: _modifiedColWidth.value,
-                                  child: Tooltip(
-                                      waitDuration: Duration(milliseconds: 500),
-                                      message: lastModifiedStr,
+                                      message: sizeStr,
                                       child: Text(
-                                        lastModifiedStr,
+                                        sizeStr,
                                         overflow: TextOverflow.ellipsis,
-                                        style: TextStyle(
-                                          fontSize: 12,
-                                          color: selectedItems.items
-                                                  .contains(entry)
-                                              ? Colors.white70
-                                              : MyTheme.darkGray,
-                                        ),
-                                      )),
-                                ),
-                              ),
-                              onTap: onTap,
-                              onSecondaryTap: onSecondaryTap,
-                              onSecondaryTapDown: onSecondaryTapDown,
-                            ),
-                            // Divider from header.
-                            SizedBox(
-                              width: 2.0,
-                            ),
-                            Expanded(
-                              // width: 100,
-                              child: GestureDetector(
-                                child: Tooltip(
-                                  waitDuration: Duration(milliseconds: 500),
-                                  message: sizeStr,
-                                  child: Text(
-                                    sizeStr,
-                                    overflow: TextOverflow.ellipsis,
-                                    style: TextStyle(
-                                        fontSize: 10,
-                                        color:
-                                            selectedItems.items.contains(entry)
-                                                ? Colors.white70
-                                                : MyTheme.darkGray),
+                                        style: const TextStyle(
+                                            fontSize: 15,
+                                            color: Color(0xFF646368)),
+                                      ),
+                                    ),
+                                    onTap: onTap,
+                                    onSecondaryTap: onSecondaryTap,
+                                    onSecondaryTapDown: onSecondaryTapDown,
                                   ),
                                 ),
-                                onTap: onTap,
-                                onSecondaryTap: onSecondaryTap,
-                                onSecondaryTapDown: onSecondaryTapDown,
-                              ),
+                              ],
                             ),
-                          ],
+                          ),
                         ),
-                      ),
-                    ),
-                  ],
-                ))),
+                      ],
+                    )))),
           );
         }).toList(growable: false);
 
@@ -1296,7 +1185,7 @@ class _FileManagerViewState extends State<FileManagerView> {
             Expanded(
               child: ListView.builder(
                 controller: scrollController,
-                itemExtent: kDesktopFileTransferRowHeight,
+                itemExtent: 40,
                 itemBuilder: (context, index) {
                   return rows[index];
                 },
@@ -1386,54 +1275,36 @@ class _FileManagerViewState extends State<FileManagerView> {
     return false;
   }
 
-  void _onDrag(double dx, RxDouble column1, RxDouble column2) {
-    if (column1.value + dx <= _fileTransferMinimumWidth ||
-        column2.value - dx <= _fileTransferMinimumWidth) {
-      return;
-    }
-    column1.value += dx;
-    column2.value -= dx;
-    column1.value = max(_fileTransferMinimumWidth, column1.value);
-    column2.value = max(_fileTransferMinimumWidth, column2.value);
-  }
-
   Widget _buildFileBrowserHeader(BuildContext context) {
-    final padding = EdgeInsets.all(1.0);
-    return SizedBox(
-      key: _globalHeaderKey,
-      height: kDesktopFileTransferHeaderHeight,
-      child: Row(
-        children: [
-          Obx(
-            () => headerItemFunc(
-                _nameColWidth.value, SortBy.name, translate("Name")),
-          ),
-          DraggableDivider(
-            axis: Axis.vertical,
-            onPointerMove: (dx) =>
-                _onDrag(dx, _nameColWidth, _modifiedColWidth),
-            padding: padding,
-          ),
-          Obx(
-            () => headerItemFunc(_modifiedColWidth.value, SortBy.modified,
-                translate("Modified")),
-          ),
-          DraggableDivider(
-              axis: Axis.vertical,
-              onPointerMove: (dx) =>
-                  _onDrag(dx, _modifiedColWidth, _sizeColWidth),
-              padding: padding),
-          Expanded(
-              child: headerItemFunc(
-                  _sizeColWidth.value, SortBy.size, translate("Size")))
-        ],
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 8),
+      child: SizedBox(
+        key: _globalHeaderKey,
+        height: kDesktopFileTransferHeaderHeight,
+        child: Row(
+          children: [
+            Obx(
+              () => headerItemFunc(
+                  _nameColWidth.value, SortBy.name, translate("Name")),
+            ),
+            Obx(
+              () => headerItemFunc(_modifiedColWidth.value, SortBy.modified,
+                  translate("Modified")),
+            ),
+            Expanded(
+                child: headerItemFunc(
+                    _sizeColWidth.value, SortBy.size, translate("Size")))
+          ],
+        ),
       ),
     );
   }
 
   Widget headerItemFunc(double? width, SortBy sortBy, String name) {
-    final headerTextStyle =
-        Theme.of(context).dataTableTheme.headingTextStyle ?? TextStyle();
+    const headerTextStyle = TextStyle(
+      color: Color(0xFFB9B8BF),
+      fontSize: 14,
+    );
     return ObxValue<Rx<bool?>>(
         (ascending) => InkWell(
               onTap: () {
@@ -1455,15 +1326,19 @@ class _FileManagerViewState extends State<FileManagerView> {
                         name,
                         style: headerTextStyle,
                         overflow: TextOverflow.ellipsis,
-                      ).marginOnly(left: 4),
+                      ).marginOnly(left: 8),
                     ),
                     ascending.value != null
-                        ? Icon(
-                            ascending.value!
-                                ? Icons.keyboard_arrow_up_rounded
-                                : Icons.keyboard_arrow_down_rounded,
+                        ? Transform.rotate(
+                            angle: ascending.value! ? -1.5708 : 1.5708,
+                            child: SvgPicture.asset(
+                              "assets/icons/file_arrow.svg",
+                              width: 16,
+                              height: 16,
+                              colorFilter: svgColor(const Color(0xFF8F8E95)),
+                            ),
                           )
-                        : SizedBox()
+                        : const SizedBox()
                   ],
                 ),
               ),
@@ -1490,6 +1365,7 @@ class _FileManagerViewState extends State<FileManagerView> {
         : Row(
             key: _locationBarKey,
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            crossAxisAlignment: CrossAxisAlignment.center,
             children: [
                 Expanded(
                   child: Listener(
@@ -1501,11 +1377,28 @@ class _FileManagerViewState extends State<FileManagerView> {
                         sc.jumpTo(sc.offset + e.scrollDelta.dy / scale);
                       }
                     },
-                    child: BreadCrumb(
-                      items: items,
-                      divider: const Icon(Icons.keyboard_arrow_right_rounded),
-                      overflow: ScrollableOverflow(
-                        controller: _breadCrumbScroller,
+                    child: SingleChildScrollView(
+                      controller: _breadCrumbScroller,
+                      scrollDirection: Axis.horizontal,
+                      child: Row(
+                        crossAxisAlignment: CrossAxisAlignment.center,
+                        children: items.asMap().entries.map((entry) {
+                          final index = entry.key;
+                          final item = entry.value;
+                          return Row(
+                            mainAxisSize: MainAxisSize.min,
+                            crossAxisAlignment: CrossAxisAlignment.center,
+                            children: [
+                              if (index > 0)
+                                const Icon(
+                                  Icons.keyboard_arrow_right_rounded,
+                                  color: Color(0xFF8F8E95),
+                                  size: 20,
+                                ),
+                              item.content,
+                            ],
+                          );
+                        }).toList(),
                       ),
                     ),
                   ),
@@ -1609,21 +1502,35 @@ class _FileManagerViewState extends State<FileManagerView> {
     if (isWindows && path == '/') {
       breadCrumbList.add(BreadCrumbItem(
           content: TextButton(
-                  child: buildWindowsThisPC(context),
-                  style: ButtonStyle(
-                      minimumSize: MaterialStateProperty.all(Size(0, 0))),
-                  onPressed: () => onPressed(['/']))
-              .marginSymmetric(horizontal: 4)));
+              child: buildWindowsThisPC(context),
+              style: ButtonStyle(
+                  minimumSize: WidgetStateProperty.all(Size(0, 0)),
+                  overlayColor: WidgetStateProperty.all(Colors.transparent),
+                  backgroundColor: WidgetStateProperty.all(Colors.transparent)),
+              onPressed: () =>
+                  onPressed(['/'])).marginSymmetric(horizontal: 4)));
     } else {
       final list = PathUtil.split(path, isWindows);
       breadCrumbList.addAll(
         list.asMap().entries.map(
               (e) => BreadCrumbItem(
                 content: TextButton(
-                  child: Text(e.value),
+                  child: Text(
+                    e.value,
+                    style: const TextStyle(color: Color(0xFF646368)),
+                  ),
                   style: ButtonStyle(
-                    minimumSize: MaterialStateProperty.all(
+                    minimumSize: WidgetStateProperty.all(
                       Size(0, 0),
+                    ),
+                    foregroundColor: WidgetStateProperty.all(
+                      const Color(0xFF646368),
+                    ),
+                    overlayColor: WidgetStateProperty.all(
+                      Colors.transparent,
+                    ),
+                    backgroundColor: WidgetStateProperty.all(
+                      Colors.transparent,
                     ),
                   ),
                   onPressed: () => onPressed(
@@ -1652,27 +1559,41 @@ class _FileManagerViewState extends State<FileManagerView> {
     final text = _locationStatus.value == LocationStatus.pathLocation
         ? controller.directory.value.path
         : _searchText.value;
-    final textController = TextEditingController(text: text)
-      ..selection = TextSelection.collapsed(offset: text.length);
+    // 컨트롤러 텍스트가 다를 때만 업데이트 (커서 위치 유지)
+    if (_locationTextController.text != text) {
+      _locationTextController.text = text;
+      _locationTextController.selection = TextSelection.collapsed(offset: text.length);
+    }
     return Row(
+      crossAxisAlignment: CrossAxisAlignment.center,
       children: [
-        SvgPicture.asset(
-          _locationStatus.value == LocationStatus.pathLocation
-              ? "assets/folder.svg"
-              : "assets/search.svg",
-          colorFilter: svgColor(Theme.of(context).tabBarTheme.labelColor),
+        Padding(
+          padding: const EdgeInsets.only(left: 8.0),
+          child: SvgPicture.asset(
+            _locationStatus.value == LocationStatus.pathLocation
+                ? "assets/icons/file-folder.svg"
+                : "assets/icons/file-sender-search.svg",
+            width: 18,
+            height: 18,
+            colorFilter: svgColor(const Color(0xFF8F8E95)),
+          ),
         ),
         Expanded(
           child: TextField(
             focusNode: _locationNode,
+            style: const TextStyle(color: Color(0xFF646368)),
             decoration: InputDecoration(
               border: InputBorder.none,
+              enabledBorder: InputBorder.none,
+              focusedBorder: InputBorder.none,
+              hoverColor: Colors.transparent,
+              fillColor: Colors.transparent,
+              filled: false,
               isDense: true,
-              prefix: Padding(
-                padding: EdgeInsets.only(left: 4.0),
-              ),
+              contentPadding:
+                  const EdgeInsets.symmetric(horizontal: 8.0, vertical: 12.0),
             ),
-            controller: textController,
+            controller: _locationTextController,
             onSubmitted: (path) {
               controller.openDirectory(path);
             },
@@ -1691,10 +1612,131 @@ class _FileManagerViewState extends State<FileManagerView> {
 }
 
 Widget buildWindowsThisPC(BuildContext context, [TextStyle? textStyle]) {
-  final color = Theme.of(context).iconTheme.color?.withOpacity(0.7);
+  const color = Color(0xFF8F8E95);
+  final style = textStyle ?? const TextStyle(color: Color(0xFF646368));
   return Row(children: [
     Icon(Icons.computer, size: 20, color: color),
     SizedBox(width: 10),
-    Text(translate('This PC'), style: textStyle)
+    Text(translate('This PC'), style: style)
   ]);
+}
+
+/// 경로 바 네비게이션 아이콘 버튼
+/// 40x40 크기, 투명 배경, 호버시 아이콘 색상 변경
+class _NavIconButton extends StatefulWidget {
+  final String iconPath;
+  final String? tooltip;
+  final VoidCallback? onPressed;
+  final double rotationAngle;
+
+  const _NavIconButton({
+    required this.iconPath,
+    this.tooltip,
+    this.onPressed,
+    this.rotationAngle = 0,
+  });
+
+  @override
+  State<_NavIconButton> createState() => _NavIconButtonState();
+}
+
+class _NavIconButtonState extends State<_NavIconButton> {
+  bool _isHovered = false;
+
+  static const _normalColor = Color(0xFF8F8E95);
+  static const _hoverColor = Color(0xFF5F71FF);
+
+  @override
+  Widget build(BuildContext context) {
+    final iconColor = _isHovered ? _hoverColor : _normalColor;
+
+    Widget icon = SvgPicture.asset(
+      widget.iconPath,
+      width: 20,
+      height: 20,
+      colorFilter: svgColor(iconColor),
+    );
+
+    if (widget.rotationAngle != 0) {
+      icon = Transform.rotate(
+        angle: widget.rotationAngle * pi / 180,
+        child: icon,
+      );
+    }
+
+    Widget button = MouseRegion(
+      cursor: widget.onPressed != null
+          ? SystemMouseCursors.click
+          : SystemMouseCursors.basic,
+      onEnter: (_) => setState(() => _isHovered = true),
+      onExit: (_) => setState(() => _isHovered = false),
+      child: GestureDetector(
+        onTap: widget.onPressed,
+        child: Container(
+          width: 40,
+          height: 40,
+          color: Colors.transparent,
+          child: Center(child: icon),
+        ),
+      ),
+    );
+
+    if (widget.tooltip != null && widget.tooltip!.isNotEmpty) {
+      button = Tooltip(
+        message: widget.tooltip!,
+        waitDuration: const Duration(milliseconds: 300),
+        child: button,
+      );
+    }
+
+    return button;
+  }
+}
+
+/// 파일 전송 카드의 삭제 버튼 (X 아이콘, 배경 없음, 호버 시 색상 변경)
+class _JobDeleteButton extends StatefulWidget {
+  final VoidCallback? onPressed;
+
+  const _JobDeleteButton({
+    Key? key,
+    this.onPressed,
+  }) : super(key: key);
+
+  @override
+  State<_JobDeleteButton> createState() => _JobDeleteButtonState();
+}
+
+class _JobDeleteButtonState extends State<_JobDeleteButton> {
+  bool _isHovered = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final iconColor = _isHovered ? const Color(0xFF5F71FF) : const Color(0xFF8F8E95);
+
+    return MouseRegion(
+      cursor: SystemMouseCursors.click,
+      onEnter: (_) => setState(() => _isHovered = true),
+      onExit: (_) => setState(() => _isHovered = false),
+      child: GestureDetector(
+        onTap: widget.onPressed,
+        child: Tooltip(
+          message: translate("Delete"),
+          waitDuration: const Duration(milliseconds: 300),
+          child: Container(
+            width: 32,
+            height: 32,
+            color: Colors.transparent,
+            child: Center(
+              child: SvgPicture.asset(
+                "assets/icons/file-sender-close.svg",
+                width: 20,
+                height: 20,
+                colorFilter: svgColor(iconColor),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
 }

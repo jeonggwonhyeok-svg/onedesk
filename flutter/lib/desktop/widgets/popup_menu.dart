@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 
 import '../../common.dart';
+import '../../common/widgets/styled_form_widgets.dart';
 import './material_mod_popup_menu.dart' as mod_menu;
 
 // https://stackoverflow.com/questions/68318314/flutter-popup-menu-inside-popup-menu
@@ -89,7 +90,7 @@ class MyPopupMenuItemState<T, W extends PopupMenuChildrenItem<T>>
 
 class MenuConfig {
   // adapt to the screen height
-  static const fontSize = 14.0;
+  static const defaultFontSize = 14.0;
   static const midPadding = 10.0;
   static const iconScale = 0.8;
   static const iconWidth = 12.0;
@@ -99,12 +100,16 @@ class MenuConfig {
   final double dividerHeight;
   final double? boxWidth;
   final Color commonColor;
+  final double fontSize;
+  final EdgeInsets? menuItemPadding;
 
   const MenuConfig(
       {required this.commonColor,
       this.height = kMinInteractiveDimension,
       this.dividerHeight = 16.0,
-      this.boxWidth});
+      this.boxWidth,
+      this.fontSize = defaultFontSize,
+      this.menuItemPadding});
 }
 
 typedef DismissCallback = Function();
@@ -121,13 +126,13 @@ abstract class MenuEntryBase<T> {
   });
   List<mod_menu.PopupMenuEntry<T>> build(BuildContext context, MenuConfig conf);
 
-  enabledStyle(BuildContext context) => TextStyle(
+  enabledStyle(BuildContext context, MenuConfig conf) => TextStyle(
       color: Theme.of(context).textTheme.titleLarge?.color,
-      fontSize: MenuConfig.fontSize,
+      fontSize: conf.fontSize,
       fontWeight: FontWeight.normal);
-  disabledStyle() => TextStyle(
+  disabledStyle(MenuConfig conf) => TextStyle(
       color: Colors.grey,
-      fontSize: MenuConfig.fontSize,
+      fontSize: conf.fontSize,
       fontWeight: FontWeight.normal);
 }
 
@@ -210,11 +215,11 @@ class MenuEntryRadios<T> extends MenuEntryBase<T> {
     Widget getTextChild() {
       final enabledTextChild = Text(
         opt.text,
-        style: enabledStyle(context),
+        style: enabledStyle(context, conf),
       );
       final disabledTextChild = Text(
         opt.text,
-        style: disabledStyle(),
+        style: disabledStyle(conf),
       );
       if (opt.enabled == null) {
         return enabledTextChild;
@@ -266,16 +271,26 @@ class MenuEntryRadios<T> extends MenuEntryBase<T> {
     }
 
     return mod_menu.PopupMenuItem(
-      padding: EdgeInsets.zero,
+      padding: conf.menuItemPadding,
       height: conf.height,
       child: Container(
         width: conf.boxWidth,
         child: opt.enabled == null
             ? TextButton(
+                style: TextButton.styleFrom(
+                  padding: EdgeInsets.zero,
+                  minimumSize: Size.zero,
+                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                ),
                 child: child,
                 onPressed: onPressed,
               )
             : Obx(() => TextButton(
+                  style: TextButton.styleFrom(
+                    padding: EdgeInsets.zero,
+                    minimumSize: Size.zero,
+                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  ),
                   child: child,
                   onPressed: opt.enabled!.isTrue ? onPressed : null,
                 )),
@@ -330,11 +345,16 @@ class MenuEntrySubRadios<T> extends MenuEntryBase<T> {
   mod_menu.PopupMenuEntry<T> _buildSecondMenu(
       BuildContext context, MenuConfig conf, MenuEntryRadioOption opt) {
     return mod_menu.PopupMenuItem(
-      padding: EdgeInsets.zero,
+      padding: conf.menuItemPadding,
       height: conf.height,
       child: Container(
           width: conf.boxWidth,
           child: TextButton(
+            style: TextButton.styleFrom(
+              padding: EdgeInsets.zero,
+              minimumSize: Size.zero,
+              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+            ),
             child: Container(
               padding: padding,
               alignment: AlignmentDirectional.centerStart,
@@ -346,7 +366,7 @@ class MenuEntrySubRadios<T> extends MenuEntryBase<T> {
                     opt.text,
                     style: TextStyle(
                         color: Theme.of(context).textTheme.titleLarge?.color,
-                        fontSize: MenuConfig.fontSize,
+                        fontSize: conf.fontSize,
                         fontWeight: FontWeight.normal),
                   ),
                   Expanded(
@@ -398,7 +418,7 @@ class MenuEntrySubRadios<T> extends MenuEntryBase<T> {
             text,
             style: TextStyle(
                 color: Theme.of(context).textTheme.titleLarge?.color,
-                fontSize: MenuConfig.fontSize,
+                fontSize: conf.fontSize,
                 fontWeight: FontWeight.normal),
           ),
           Expanded(
@@ -460,16 +480,21 @@ abstract class MenuEntrySwitchBase<T> extends MenuEntryBase<T> {
       BuildContext context, MenuConfig conf) {
     textStyle ??= TextStyle(
             color: Theme.of(context).textTheme.titleLarge?.color,
-            fontSize: MenuConfig.fontSize,
+            fontSize: conf.fontSize,
             fontWeight: FontWeight.normal)
         .obs;
     return [
       mod_menu.PopupMenuItem(
-        padding: EdgeInsets.zero,
+        padding: conf.menuItemPadding,
         height: conf.height,
         child: Container(
             width: conf.boxWidth,
             child: TextButton(
+              style: TextButton.styleFrom(
+                padding: EdgeInsets.zero,
+                minimumSize: Size.zero,
+                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              ),
               child: Container(
                   padding: padding,
                   alignment: AlignmentDirectional.centerStart,
@@ -496,7 +521,7 @@ abstract class MenuEntrySwitchBase<T> extends MenuEntryBase<T> {
                                     : null,
                               );
                             } else {
-                              return Checkbox(
+                              return StyledCheckbox(
                                 value: curOption.value,
                                 onChanged: isEnabled
                                     ? (v) {
@@ -504,6 +529,7 @@ abstract class MenuEntrySwitchBase<T> extends MenuEntryBase<T> {
                                         setOption(v);
                                       }
                                     : null,
+                                enabled: isEnabled,
                               );
                             }
                           })),
@@ -672,8 +698,8 @@ class MenuEntrySubMenu<T> extends MenuEntryBase<T> {
           Obx(() => Text(
                 text,
                 style: super.enabled!.value
-                    ? enabledStyle(context)
-                    : disabledStyle(),
+                    ? enabledStyle(context, conf)
+                    : disabledStyle(conf),
               )),
           Expanded(
               child: Align(
@@ -712,6 +738,11 @@ class MenuEntryButton<T> extends MenuEntryBase<T> {
     return Obx(() => Container(
         width: conf.boxWidth,
         child: TextButton(
+          style: TextButton.styleFrom(
+            padding: EdgeInsets.zero,
+            minimumSize: Size.zero,
+            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+          ),
           onPressed: super.enabled!.value
               ? () {
                   if (super.dismissOnClicked && Navigator.canPop(context)) {
@@ -729,7 +760,7 @@ class MenuEntryButton<T> extends MenuEntryBase<T> {
             constraints:
                 BoxConstraints(minHeight: conf.height, maxHeight: conf.height),
             child: childBuilder(
-                super.enabled!.value ? enabledStyle(context) : disabledStyle()),
+                super.enabled!.value ? enabledStyle(context, conf) : disabledStyle(conf)),
           ),
         )));
   }
@@ -739,7 +770,7 @@ class MenuEntryButton<T> extends MenuEntryBase<T> {
       BuildContext context, MenuConfig conf) {
     return [
       mod_menu.PopupMenuItem(
-        padding: EdgeInsets.zero,
+        padding: conf.menuItemPadding,
         height: conf.height,
         child: _buildChild(context, conf),
       )

@@ -1,417 +1,361 @@
-import 'dart:async';
-import 'dart:convert';
+/// 로그인 다이얼로그
+/// 이메일/비밀번호 기반 로그인 및 소셜 로그인(Google, Kakao, Naver)을 제공합니다.
+library;
 
+import 'dart:async';
+
+import 'package:bot_toast/bot_toast.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter_hbb/common/hbbs/hbbs.dart';
-import 'package:flutter_hbb/models/platform_model.dart';
-import 'package:flutter_hbb/models/user_model.dart';
-import 'package:get/get.dart';
 import 'package:flutter_svg/flutter_svg.dart';
-import 'package:url_launcher/url_launcher.dart';
+import 'package:get/get.dart';
 
 import '../../common.dart';
+import '../../utils/multi_window_manager.dart';
+import '../api/auth_service.dart';
+import '../api/session_service.dart';
+import '../api/api_client.dart';
+import '../api/models.dart';
+import '../api/google_auth_service.dart';
+import '../../models/platform_model.dart';
+import '../../models/user_model.dart';
 import './dialog.dart';
+import './signup.dart';
+import './reset_password.dart';
+import './styled_form_widgets.dart';
 
-const kOpSvgList = [
-  'github',
-  'gitlab',
-  'google',
-  'apple',
-  'okta',
-  'facebook',
-  'azure',
-  'auth0'
-];
+/// 이메일 유효성 검사 정규식
+final _emailRegex = RegExp(r'^[^@\s]+@[^@\s]+\.[^@\s]+$');
 
-class _IconOP extends StatelessWidget {
-  final String op;
-  final String? icon;
-  final EdgeInsets margin;
-  const _IconOP(
-      {Key? key,
-      required this.op,
-      required this.icon,
-      this.margin = const EdgeInsets.symmetric(horizontal: 4.0)})
-      : super(key: key);
+/// 텍스트 링크 버튼 (호버 시 밑줄 표시)
+class _TextLinkButton extends StatefulWidget {
+  final String text;
+  final VoidCallback? onTap;
 
-  @override
-  Widget build(BuildContext context) {
-    final svgFile =
-        kOpSvgList.contains(op.toLowerCase()) ? op.toLowerCase() : 'default';
-    return Container(
-      margin: margin,
-      child: icon == null
-          ? SvgPicture.asset(
-              'assets/auth-$svgFile.svg',
-              width: 20,
-            )
-          : SvgPicture.string(
-              icon!,
-              width: 20,
-            ),
-    );
-  }
-}
-
-class ButtonOP extends StatelessWidget {
-  final String op;
-  final RxString curOP;
-  final String? icon;
-  final Color primaryColor;
-  final double height;
-  final Function() onTap;
-
-  const ButtonOP({
+  const _TextLinkButton({
     Key? key,
-    required this.op,
-    required this.curOP,
-    required this.icon,
-    required this.primaryColor,
-    required this.height,
-    required this.onTap,
+    required this.text,
+    this.onTap,
   }) : super(key: key);
 
   @override
+  State<_TextLinkButton> createState() => _TextLinkButtonState();
+}
+
+class _TextLinkButtonState extends State<_TextLinkButton> {
+  bool _isHovered = false;
+
+  @override
   Widget build(BuildContext context) {
-    final opLabel = {
-          'github': 'GitHub',
-          'gitlab': 'GitLab'
-        }[op.toLowerCase()] ??
-        toCapitalized(op);
-    return Row(children: [
-      Container(
-        height: height,
-        width: 200,
-        child: Obx(() => ElevatedButton(
-            style: ElevatedButton.styleFrom(
-              backgroundColor: curOP.value.isEmpty || curOP.value == op
-                  ? primaryColor
-                  : Colors.grey,
-            ).copyWith(elevation: ButtonStyleButton.allOrNull(0.0)),
-            onPressed: curOP.value.isEmpty || curOP.value == op ? onTap : null,
-            child: Row(
-              children: [
-                SizedBox(
-                  width: 30,
-                  child: _IconOP(
-                    op: op,
-                    icon: icon,
-                    margin: EdgeInsets.only(right: 5),
-                  ),
-                ),
-                Expanded(
-                  child: FittedBox(
-                    fit: BoxFit.scaleDown,
-                    child: Center(
-                        child: Text('${translate("Continue with")} $opLabel')),
-                  ),
-                ),
-              ],
-            ))),
+    const linkColor = Color(0xFF666666);
+    return MouseRegion(
+      cursor: SystemMouseCursors.click,
+      onEnter: (_) => setState(() => _isHovered = true),
+      onExit: (_) => setState(() => _isHovered = false),
+      child: GestureDetector(
+        onTap: widget.onTap,
+        behavior: HitTestBehavior.opaque,
+        child: Text(
+          widget.text,
+          style: TextStyle(
+            fontSize: 13,
+            color: linkColor,
+            decoration: _isHovered ? TextDecoration.underline : TextDecoration.none,
+            decorationColor: linkColor,
+            backgroundColor: Colors.transparent,
+          ),
+        ),
       ),
-    ]);
-  }
-}
-
-class ConfigOP {
-  final String op;
-  final String? icon;
-  ConfigOP({required this.op, required this.icon});
-}
-
-class WidgetOP extends StatefulWidget {
-  final ConfigOP config;
-  final RxString curOP;
-  final Function(Map<String, dynamic>) cbLogin;
-  const WidgetOP({
-    Key? key,
-    required this.config,
-    required this.curOP,
-    required this.cbLogin,
-  }) : super(key: key);
-
-  @override
-  State<StatefulWidget> createState() {
-    return _WidgetOPState();
-  }
-}
-
-class _WidgetOPState extends State<WidgetOP> {
-  Timer? _updateTimer;
-  String _stateMsg = '';
-  String _failedMsg = '';
-  String _url = '';
-
-  @override
-  void dispose() {
-    super.dispose();
-    _updateTimer?.cancel();
-  }
-
-  _beginQueryState() {
-    _updateTimer = Timer.periodic(Duration(seconds: 1), (timer) {
-      _updateState();
-    });
-  }
-
-  _updateState() {
-    bind.mainAccountAuthResult().then((result) {
-      if (result.isEmpty) {
-        return;
-      }
-      final resultMap = jsonDecode(result);
-      if (resultMap == null) {
-        return;
-      }
-      final String stateMsg = resultMap['state_msg'];
-      String failedMsg = resultMap['failed_msg'];
-      final String? url = resultMap['url'];
-      final bool urlLaunched = (resultMap['url_launched'] as bool?) ?? false;
-      final authBody = resultMap['auth_body'];
-      if (_stateMsg != stateMsg || _failedMsg != failedMsg) {
-        if (_url.isEmpty && url != null && url.isNotEmpty) {
-          if (!urlLaunched) {
-            launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication);
-          }
-          _url = url;
-        }
-        if (authBody != null) {
-          _updateTimer?.cancel();
-          widget.curOP.value = '';
-          widget.cbLogin(authBody as Map<String, dynamic>);
-        }
-
-        setState(() {
-          _stateMsg = stateMsg;
-          _failedMsg = failedMsg;
-          if (failedMsg.isNotEmpty) {
-            widget.curOP.value = '';
-            _updateTimer?.cancel();
-          }
-        });
-      }
-    });
-  }
-
-  _resetState() {
-    _stateMsg = '';
-    _failedMsg = '';
-    _url = '';
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Column(
-      children: [
-        ButtonOP(
-          op: widget.config.op,
-          curOP: widget.curOP,
-          icon: widget.config.icon,
-          primaryColor: str2color(widget.config.op, 0x7f),
-          height: 36,
-          onTap: () async {
-            _resetState();
-            widget.curOP.value = widget.config.op;
-            await bind.mainAccountAuth(op: widget.config.op, rememberMe: true);
-            _beginQueryState();
-          },
-        ),
-        Obx(() {
-          if (widget.curOP.isNotEmpty &&
-              widget.curOP.value != widget.config.op) {
-            _failedMsg = '';
-          }
-          return Offstage(
-            offstage:
-                _failedMsg.isEmpty && widget.curOP.value != widget.config.op,
-            child: RichText(
-              text: TextSpan(
-                text: '$_stateMsg  ',
-                style:
-                    DefaultTextStyle.of(context).style.copyWith(fontSize: 12),
-                children: <TextSpan>[
-                  TextSpan(
-                    text: _failedMsg,
-                    style: DefaultTextStyle.of(context).style.copyWith(
-                          fontSize: 14,
-                          color: Colors.red,
-                        ),
-                  ),
-                ],
-              ),
-            ),
-          );
-        }),
-        Obx(
-          () => Offstage(
-            offstage: widget.curOP.value != widget.config.op,
-            child: const SizedBox(
-              height: 5.0,
-            ),
-          ),
-        ),
-        Obx(
-          () => Offstage(
-            offstage: widget.curOP.value != widget.config.op,
-            child: ConstrainedBox(
-              constraints: BoxConstraints(maxHeight: 20),
-              child: ElevatedButton(
-                onPressed: () {
-                  widget.curOP.value = '';
-                  _updateTimer?.cancel();
-                  _resetState();
-                  bind.mainAccountAuthCancel();
-                },
-                child: Text(
-                  translate('Cancel'),
-                  style: TextStyle(fontSize: 15),
-                ),
-              ),
-            ),
-          ),
-        ),
-      ],
     );
   }
 }
 
-class LoginWidgetOP extends StatelessWidget {
-  final List<ConfigOP> ops;
-  final RxString curOP;
-  final Function(Map<String, dynamic>) cbLogin;
+/// 소셜 로그인 버튼 위젯 (호버 시 테두리 및 텍스트 색상 변경)
+class SocialLoginButton extends StatefulWidget {
+  final String iconPath;
+  final String label;
+  final VoidCallback? onPressed;
+  final Color? backgroundColor;
+  final Color? foregroundColor;
+  final bool isInProgress;
 
-  LoginWidgetOP({
+  const SocialLoginButton({
     Key? key,
-    required this.ops,
-    required this.curOP,
-    required this.cbLogin,
+    required this.iconPath,
+    required this.label,
+    this.onPressed,
+    this.backgroundColor,
+    this.foregroundColor,
+    this.isInProgress = false,
   }) : super(key: key);
 
   @override
+  State<SocialLoginButton> createState() => _SocialLoginButtonState();
+}
+
+class _SocialLoginButtonState extends State<SocialLoginButton> {
+  bool _isHovered = false;
+
+  @override
   Widget build(BuildContext context) {
-    var children = ops
-        .map((op) => [
-              WidgetOP(
-                config: op,
-                curOP: curOP,
-                cbLogin: cbLogin,
+    const hoverColor = Color(0xFF5B7BF8);
+    final isDisabled = widget.onPressed == null || widget.isInProgress;
+    final borderColor = isDisabled
+        ? Colors.grey.shade300
+        : (_isHovered ? hoverColor : Colors.grey.shade300);
+    final textColor = isDisabled
+        ? Colors.grey[400]
+        : (_isHovered ? hoverColor : (widget.foregroundColor ?? Colors.black87));
+
+    return MouseRegion(
+      cursor: isDisabled ? SystemMouseCursors.basic : SystemMouseCursors.click,
+      onEnter: (_) => setState(() => _isHovered = true),
+      onExit: (_) => setState(() => _isHovered = false),
+      child: SizedBox(
+        height: 42,
+        width: double.infinity,
+        child: OutlinedButton(
+          onPressed: widget.isInProgress ? null : widget.onPressed,
+          style: OutlinedButton.styleFrom(
+            backgroundColor: widget.backgroundColor,
+            foregroundColor: widget.foregroundColor,
+            side: BorderSide(color: borderColor),
+            overlayColor: Colors.transparent,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(8),
+            ),
+          ),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              SvgPicture.asset(
+                widget.iconPath,
+                width: 20,
+                height: 20,
               ),
-              const Divider(
-                indent: 5,
-                endIndent: 5,
-              )
-            ])
-        .expand((i) => i)
-        .toList();
-    if (children.isNotEmpty) {
-      children.removeLast();
-    }
-    return SingleChildScrollView(
-        child: Container(
-            width: 200,
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              mainAxisAlignment: MainAxisAlignment.spaceAround,
-              children: children,
-            )));
+              const SizedBox(width: 12),
+              Text(
+                widget.label,
+                style: TextStyle(
+                  fontSize: 14,
+                  color: textColor,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
   }
 }
 
+/// 로그인 위젯 (이메일/비밀번호)
 class LoginWidgetUserPass extends StatelessWidget {
-  final TextEditingController username;
+  final TextEditingController email;
   final TextEditingController pass;
-  final String? usernameMsg;
+  final String? emailMsg;
   final String? passMsg;
   final bool isInProgress;
-  final RxString curOP;
   final Function() onLogin;
-  final FocusNode? userFocusNode;
+  final Function() onSignup;
+  final Function() onResetPassword;
+  final Function() onGoogleLogin;
+  final Function() onKakaoLogin;
+  final Function() onNaverLogin;
+  final FocusNode? emailFocusNode;
+
   const LoginWidgetUserPass({
     Key? key,
-    this.userFocusNode,
-    required this.username,
+    this.emailFocusNode,
+    required this.email,
     required this.pass,
-    required this.usernameMsg,
+    required this.emailMsg,
     required this.passMsg,
     required this.isInProgress,
-    required this.curOP,
     required this.onLogin,
+    required this.onSignup,
+    required this.onResetPassword,
+    required this.onGoogleLogin,
+    required this.onKakaoLogin,
+    required this.onNaverLogin,
   }) : super(key: key);
 
   @override
   Widget build(BuildContext context) {
     return Padding(
-        padding: EdgeInsets.all(0),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.center,
-          children: [
-            const SizedBox(height: 8.0),
-            DialogTextField(
-                title: translate(DialogTextField.kUsernameTitle),
-                controller: username,
-                focusNode: userFocusNode,
-                prefixIcon: DialogTextField.kUsernameIcon,
-                errorText: usernameMsg),
-            PasswordWidget(
-              controller: pass,
-              autoFocus: false,
-              reRequestFocus: true,
-              errorText: passMsg,
+      padding: const EdgeInsets.all(0),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // 이메일 필드
+          Text(
+            translate('Email'),
+            style: const TextStyle(
+              fontSize: 14,
+              fontWeight: FontWeight.w500,
             ),
-            // NOT use Offstage to wrap LinearProgressIndicator
-            if (isInProgress) const LinearProgressIndicator(),
-            const SizedBox(height: 12.0),
-            FittedBox(
-                child:
-                    Row(mainAxisAlignment: MainAxisAlignment.center, children: [
-              Container(
-                height: 38,
-                width: 200,
-                child: Obx(() => ElevatedButton(
-                      child: Text(
-                        translate('Login'),
-                        style: TextStyle(fontSize: 16),
-                      ),
-                      onPressed:
-                          curOP.value.isEmpty || curOP.value == 'rustdesk'
-                              ? () {
-                                  onLogin();
-                                }
-                              : null,
-                    )),
+          ),
+          const SizedBox(height: 8.0),
+          TextField(
+            controller: email,
+            focusNode: emailFocusNode,
+            keyboardType: TextInputType.emailAddress,
+            decoration: InputDecoration(
+              hintText: translate('Enter your email'),
+              hintStyle: TextStyle(color: Colors.grey.shade400),
+              errorText: emailMsg,
+              contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(8),
+                borderSide: BorderSide(color: Colors.grey.shade300),
               ),
-            ])),
+              enabledBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(8),
+                borderSide: BorderSide(color: Colors.grey.shade300),
+              ),
+              focusedBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(8),
+                borderSide: BorderSide(color: Theme.of(context).primaryColor),
+              ),
+            ),
+          ),
+          const SizedBox(height: 16.0),
+          // 비밀번호 필드
+          Text(
+            translate('Password'),
+            style: const TextStyle(
+              fontSize: 14,
+              fontWeight: FontWeight.w500,
+            ),
+          ),
+          const SizedBox(height: 8.0),
+          TextField(
+            controller: pass,
+            obscureText: true,
+            decoration: InputDecoration(
+              hintText: translate('Enter your password'),
+              hintStyle: TextStyle(color: Colors.grey.shade400),
+              errorText: passMsg,
+              contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(8),
+                borderSide: BorderSide(color: Colors.grey.shade300),
+              ),
+              enabledBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(8),
+                borderSide: BorderSide(color: Colors.grey.shade300),
+              ),
+              focusedBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(8),
+                borderSide: BorderSide(color: Theme.of(context).primaryColor),
+              ),
+            ),
+          ),
+          const SizedBox(height: 8.0),
+          // 비밀번호 찾기 / 회원가입 링크 (같은 줄)
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              _TextLinkButton(
+                text: translate('Forgot password?'),
+                onTap: onResetPassword,
+              ),
+              _TextLinkButton(
+                text: translate('Sign Up'),
+                onTap: onSignup,
+              ),
+            ],
+          ),
+          // 진행 표시
+          if (isInProgress) ...[
+            const SizedBox(height: 12.0),
+            const LinearProgressIndicator(),
           ],
-        ));
+          const SizedBox(height: 20.0),
+          // 로그인 버튼
+          SizedBox(
+            height: 48,
+            width: double.infinity,
+            child: ElevatedButton(
+              onPressed: isInProgress ? null : onLogin,
+              style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFF5B6EF5),
+                foregroundColor: Colors.white,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                elevation: 0,
+              ),
+              child: Text(
+                translate('Login'),
+                style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w500),
+              ),
+            ),
+          ),
+          const SizedBox(height: 24.0),
+          // 구분선
+          Row(
+            children: [
+              const Expanded(child: Divider()),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16),
+                child: Text(
+                  translate('or'),
+                  style: TextStyle(
+                    color: Colors.grey.shade500,
+                  ),
+                ),
+              ),
+              const Expanded(child: Divider()),
+            ],
+          ),
+          const SizedBox(height: 20.0),
+          // 소셜 로그인 버튼들
+          SocialLoginButton(
+            iconPath: 'assets/icons/google.svg',
+            label: translate('Continue with Google'),
+            onPressed: onGoogleLogin,
+            isInProgress: isInProgress,
+          ),
+          const SizedBox(height: 12.0),
+          SocialLoginButton(
+            iconPath: 'assets/icons/naver.svg',
+            label: translate('Continue with Naver'),
+            onPressed: onNaverLogin,
+            backgroundColor: const Color(0xFF03C75A),
+            foregroundColor: Colors.white,
+            isInProgress: isInProgress,
+          ),
+          const SizedBox(height: 12.0),
+          SocialLoginButton(
+            iconPath: 'assets/icons/kakao.svg',
+            label: translate('Continue with Kakao'),
+            onPressed: onKakaoLogin,
+            backgroundColor: const Color(0xFFFEE500),
+            foregroundColor: const Color(0xFF000000),
+            isInProgress: isInProgress,
+          ),
+        ],
+      ),
+    );
   }
 }
 
-const kAuthReqTypeOidc = 'oidc/';
-
-// call this directly
+/// 메인 로그인 다이얼로그
 Future<bool?> loginDialog() async {
-  var username =
-      TextEditingController(text: UserModel.getLocalUserInfo()?['name'] ?? '');
+  var email = TextEditingController();
   var password = TextEditingController();
-  final userFocusNode = FocusNode()..requestFocus();
-  Timer(Duration(milliseconds: 100), () => userFocusNode..requestFocus());
+  final emailFocusNode = FocusNode()..requestFocus();
+  Timer(const Duration(milliseconds: 100), () => emailFocusNode.requestFocus());
 
-  String? usernameMsg;
+  String? emailMsg;
   String? passwordMsg;
   var isInProgress = false;
-  final RxString curOP = ''.obs;
-  // Track hover state for the close icon
   bool isCloseHovered = false;
 
-  final loginOptions = [].obs;
-  Future.delayed(Duration.zero, () async {
-    loginOptions.value = await UserModel.queryOidcLoginOptions();
-  });
-
   final res = await gFFI.dialogManager.show<bool>((setState, close, context) {
-    username.addListener(() {
-      if (usernameMsg != null) {
-        setState(() => usernameMsg = null);
+    email.addListener(() {
+      if (emailMsg != null) {
+        setState(() => emailMsg = null);
       }
     });
 
@@ -421,153 +365,183 @@ Future<bool?> loginDialog() async {
       }
     });
 
-    onDialogCancel() {
+    void onDialogCancel() {
       isInProgress = false;
       close(false);
     }
 
-    handleLoginResponse(LoginResponse resp, bool storeIfAccessToken,
-        void Function([dynamic])? close) async {
-      switch (resp.type) {
-        case HttpType.kAuthResTypeToken:
-          if (resp.access_token != null) {
-            if (storeIfAccessToken) {
-              await bind.mainSetLocalOption(
-                  key: 'access_token', value: resp.access_token!);
-              await bind.mainSetLocalOption(
-                  key: 'user_info', value: jsonEncode(resp.user ?? {}));
-            }
-            if (close != null) {
-              close(true);
-            }
-            return;
-          }
-          break;
-        case HttpType.kAuthResTypeEmailCheck:
-          bool? isEmailVerification;
-          if (resp.tfa_type == null ||
-              resp.tfa_type == HttpType.kAuthResTypeEmailCheck) {
-            isEmailVerification = true;
-          } else if (resp.tfa_type == HttpType.kAuthResTypeTfaCheck) {
-            isEmailVerification = false;
-          } else {
-            passwordMsg = "Failed, bad tfa type from server";
-          }
-          if (isEmailVerification != null) {
-            if (isMobile) {
-              if (close != null) close(null);
-              verificationCodeDialog(
-                  resp.user, resp.secret, isEmailVerification);
-            } else {
-              setState(() => isInProgress = false);
-              // Workaround for web, close the dialog first, then show the verification code dialog.
-              // Otherwise, the text field will keep selecting the text and we can't input the code.
-              // Not sure why this happens.
-              if (isWeb && close != null) close(null);
-              final res = await verificationCodeDialog(
-                  resp.user, resp.secret, isEmailVerification);
-              if (res == true) {
-                if (!isWeb && close != null) close(false);
-                return;
-              }
-            }
-          }
-          break;
-        default:
-          passwordMsg = "Failed, bad response from server";
-          break;
+    // 로그인 처리
+    Future<void> onLogin() async {
+      // 유효성 검사
+      if (email.text.isEmpty) {
+        setState(() => emailMsg = translate('Please enter your email'));
+        return;
       }
-    }
-
-    onLogin() async {
-      // validate
-      if (username.text.isEmpty) {
-        setState(() => usernameMsg = translate('Username missed'));
+      if (!_emailRegex.hasMatch(email.text)) {
+        setState(() => emailMsg = translate('Invalid email format'));
         return;
       }
       if (password.text.isEmpty) {
         setState(() => passwordMsg = translate('Password missed'));
         return;
       }
-      curOP.value = 'rustdesk';
+
       setState(() => isInProgress = true);
+
       try {
-        final resp = await gFFI.userModel.login(LoginRequest(
-            username: username.text,
-            password: password.text,
-            id: await bind.mainGetMyId(),
-            uuid: await bind.mainGetUuid(),
-            autoLogin: true,
-            type: HttpType.kAuthReqTypeAccount));
-        await handleLoginResponse(resp, true, close);
-      } on RequestException catch (err) {
-        passwordMsg = translate(err.cause);
-      } catch (err) {
-        passwordMsg = "Unknown Error: $err";
+        final authService = getAuthService();
+        final sessionService = getSessionService();
+
+        // 로그인 API 호출
+        final loginRes = await authService.login(email.text, password.text);
+        if (!loginRes.success) {
+          setState(() {
+            passwordMsg = translate('Login failed. Please check your credentials.');
+            isInProgress = false;
+          });
+          return;
+        }
+
+        // 사용자 정보 조회
+        final meRes = await authService.me();
+        if (!meRes.success || meRes.data == null) {
+          setState(() {
+            passwordMsg = translate('Failed to get user info');
+            isInProgress = false;
+          });
+          return;
+        }
+
+        // UserInfo 생성
+        final userInfo = UserInfo.fromJson(meRes.data!);
+
+        // 디바이스 ID 및 버전 가져오기
+        final deviceId = await bind.mainGetMyId();
+        final version = await bind.mainGetVersion();
+
+        // 세션 등록
+        final registerRes = await sessionService.registerSession(deviceId, version);
+        if (!registerRes.success) {
+          setState(() {
+            passwordMsg = translate('Failed to register session');
+            isInProgress = false;
+          });
+          return;
+        }
+
+        final deviceKey = registerRes.extract('deviceKey') ?? '';
+        userInfo.deviceKey = deviceKey;
+
+        // 세션 활성화 (약간의 딜레이 추가 - 서버 동기화 대기)
+        await Future.delayed(const Duration(milliseconds: 500));
+        final activateRes = await sessionService.activateSession(deviceKey);
+        if (!activateRes.success) {
+          setState(() {
+            passwordMsg = '${translate('Failed to activate session')}: ${activateRes.message ?? activateRes.rawBody}';
+            isInProgress = false;
+          });
+          return;
+        }
+
+        userInfo.sessionKey = activateRes.extract('sessionKey');
+
+        // UserModel 업데이트
+        gFFI.userModel.loginWithUserInfo(userInfo);
+
+        close(true);
+      } catch (e) {
+        setState(() {
+          passwordMsg = e.toString();
+          isInProgress = false;
+        });
       }
-      curOP.value = '';
-      setState(() => isInProgress = false);
     }
 
-    thirdAuthWidget() => Obx(() {
-          return Offstage(
-            offstage: loginOptions.isEmpty,
-            child: Column(
-              children: [
-                const SizedBox(
-                  height: 8.0,
-                ),
-                Center(
-                    child: Text(
-                  translate('or'),
-                  style: TextStyle(fontSize: 16),
-                )),
-                const SizedBox(
-                  height: 8.0,
-                ),
-                LoginWidgetOP(
-                  ops: loginOptions
-                      .map((e) => ConfigOP(op: e['name'], icon: e['icon']))
-                      .toList(),
-                  curOP: curOP,
-                  cbLogin: (Map<String, dynamic> authBody) async {
-                    LoginResponse? resp;
-                    try {
-                      // access_token is already stored in the rust side.
-                      resp =
-                          gFFI.userModel.getLoginResponseFromAuthBody(authBody);
-                    } catch (e) {
-                      debugPrint(
-                          'Failed to parse oidc login body: "$authBody"');
-                    }
-                    close(true);
+    // 회원가입 다이얼로그 열기
+    void onSignup() async {
+      close(null);
+      final result = await signupDialog();
+      if (result == true) {
+        // 회원가입 성공 후 로그인 다이얼로그 다시 열기
+        loginDialog();
+      }
+    }
 
-                    if (resp != null) {
-                      handleLoginResponse(resp, false, null);
-                    }
-                  },
-                ),
-              ],
-            ),
-          );
+    // 비밀번호 재설정 다이얼로그 열기
+    void onResetPassword() async {
+      close(null);
+      final result = await resetPasswordDialog();
+      if (result == true) {
+        // 비밀번호 재설정 성공 후 로그인 다이얼로그 다시 열기
+        loginDialog();
+      }
+    }
+
+    // Google 로그인 처리
+    Future<void> onGoogleLogin() async {
+      if (!isGoogleAuthServiceInitialized()) {
+        setState(() => passwordMsg = translate('Google login not available'));
+        return;
+      }
+
+      setState(() => isInProgress = true);
+
+      try {
+        final googleAuth = getGoogleAuthService();
+        final result = await googleAuth.login();
+
+        if (!result.success) {
+          setState(() {
+            passwordMsg = result.error ?? translate('Google login failed');
+            isInProgress = false;
+          });
+          return;
+        }
+
+        if (result.userInfo != null) {
+          gFFI.userModel.loginWithUserInfo(result.userInfo!);
+          close(true);
+        } else {
+          setState(() {
+            passwordMsg = translate('Failed to get user info');
+            isInProgress = false;
+          });
+        }
+      } catch (e) {
+        setState(() {
+          passwordMsg = e.toString();
+          isInProgress = false;
         });
+      }
+    }
+
+    // Kakao 로그인 처리 (UI만, API 미구현)
+    Future<void> onKakaoLogin() async {
+      // TODO: Kakao 로그인 API 구현 후 연동
+      showToast(translate('Kakao login is not available yet'));
+    }
+
+    // Naver 로그인 처리 (UI만, API 미구현)
+    Future<void> onNaverLogin() async {
+      // TODO: Naver 로그인 API 구현 후 연동
+      showToast(translate('Naver login is not available yet'));
+    }
 
     final title = Row(
       mainAxisAlignment: MainAxisAlignment.spaceBetween,
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(
-          translate('Login'),
-        ).marginOnly(top: MyTheme.dialogPadding),
+        Text(translate('Login')).marginOnly(top: MyTheme.dialogPadding),
         MouseRegion(
           onEnter: (_) => setState(() => isCloseHovered = true),
           onExit: (_) => setState(() => isCloseHovered = false),
           child: InkWell(
+            onTap: onDialogCancel,
+            hoverColor: Colors.red,
+            borderRadius: BorderRadius.circular(5),
             child: Icon(
               Icons.close,
               size: 25,
-              // No need to handle the branch of null.
-              // Because we can ensure the color is not null when debug.
               color: isCloseHovered
                   ? Colors.white
                   : Theme.of(context)
@@ -576,9 +550,6 @@ Future<bool?> loginDialog() async {
                       ?.color
                       ?.withOpacity(0.55),
             ),
-            onTap: onDialogCancel,
-            hoverColor: Colors.red,
-            borderRadius: BorderRadius.circular(5),
           ),
         ).marginOnly(top: 10, right: 15),
       ],
@@ -588,24 +559,25 @@ Future<bool?> loginDialog() async {
     return CustomAlertDialog(
       title: title,
       titlePadding: titlePadding,
-      contentBoxConstraints: BoxConstraints(minWidth: 400),
+      contentBoxConstraints: const BoxConstraints(minWidth: 400),
       content: Column(
         crossAxisAlignment: CrossAxisAlignment.center,
         children: [
-          const SizedBox(
-            height: 8.0,
-          ),
+          const SizedBox(height: 8.0),
           LoginWidgetUserPass(
-            username: username,
+            email: email,
             pass: password,
-            usernameMsg: usernameMsg,
+            emailMsg: emailMsg,
             passMsg: passwordMsg,
             isInProgress: isInProgress,
-            curOP: curOP,
             onLogin: onLogin,
-            userFocusNode: userFocusNode,
+            onSignup: onSignup,
+            onResetPassword: onResetPassword,
+            onGoogleLogin: onGoogleLogin,
+            onKakaoLogin: onKakaoLogin,
+            onNaverLogin: onNaverLogin,
+            emailFocusNode: emailFocusNode,
           ),
-          thirdAuthWidget(),
         ],
       ),
       onCancel: onDialogCancel,
@@ -613,139 +585,263 @@ Future<bool?> loginDialog() async {
     );
   });
 
-  if (res != null) {
-    await UserModel.updateOtherModels();
-  }
-
   return res;
 }
 
-Future<bool?> verificationCodeDialog(
-    UserPayload? user, String? secret, bool isEmailVerification) async {
-  var autoLogin = true;
-  var isInProgress = false;
-  String? errorText;
-
-  final code = TextEditingController();
-
-  final res = await gFFI.dialogManager.show<bool>((setState, close, context) {
-    void onVerify() async {
-      setState(() => isInProgress = true);
-
-      try {
-        final resp = await gFFI.userModel.login(LoginRequest(
-            verificationCode: code.text,
-            tfaCode: isEmailVerification ? null : code.text,
-            secret: secret,
-            username: user?.name,
-            id: await bind.mainGetMyId(),
-            uuid: await bind.mainGetUuid(),
-            autoLogin: autoLogin,
-            type: HttpType.kAuthReqTypeEmailCode));
-
-        switch (resp.type) {
-          case HttpType.kAuthResTypeToken:
-            if (resp.access_token != null) {
-              await bind.mainSetLocalOption(
-                  key: 'access_token', value: resp.access_token!);
-              close(true);
-              return;
-            }
-            break;
-          default:
-            errorText = "Failed, bad response from server";
-            break;
-        }
-      } on RequestException catch (err) {
-        errorText = translate(err.cause);
-      } catch (err) {
-        errorText = "Unknown Error: $err";
-      }
-
-      setState(() => isInProgress = false);
-    }
-
-    final codeField = isEmailVerification
-        ? DialogEmailCodeField(
-            controller: code,
-            errorText: errorText,
-            readyCallback: onVerify,
-            onChanged: () => errorText = null,
-          )
-        : Dialog2FaField(
-            controller: code,
-            errorText: errorText,
-            readyCallback: onVerify,
-            onChanged: () => errorText = null,
-          );
-
-    getOnSubmit() => codeField.isReady ? onVerify : null;
-
-    return CustomAlertDialog(
-        title: Text(translate("Verification code")),
-        contentBoxConstraints: BoxConstraints(maxWidth: 300),
-        content: Column(
-          children: [
-            Offstage(
-                offstage: !isEmailVerification || user?.email == null,
-                child: TextField(
-                  decoration: InputDecoration(
-                      labelText: "Email", prefixIcon: Icon(Icons.email)),
-                  readOnly: true,
-                  controller: TextEditingController(text: user?.email),
-                ).workaroundFreezeLinuxMint()),
-            isEmailVerification ? const SizedBox(height: 8) : const Offstage(),
-            codeField,
-            /*
-            CheckboxListTile(
-              contentPadding: const EdgeInsets.all(0),
-              dense: true,
-              controlAffinity: ListTileControlAffinity.leading,
-              title: Row(children: [
-                Expanded(child: Text(translate("Trust this device")))
-              ]),
-              value: trustThisDevice,
-              onChanged: (v) {
-                if (v == null) return;
-                setState(() => trustThisDevice = !trustThisDevice);
-              },
-            ),
-            */
-            // NOT use Offstage to wrap LinearProgressIndicator
-            if (isInProgress) const LinearProgressIndicator(),
-          ],
-        ),
-        onCancel: close,
-        onSubmit: getOnSubmit(),
-        actions: [
-          dialogButton("Cancel", onPressed: close, isOutline: true),
-          dialogButton("Verify", onPressed: getOnSubmit()),
-        ]);
-  });
-  // For verification code, desktop update other models in login dialog, mobile need to close login dialog first,
-  // otherwise the soft keyboard will jump out on each key press, so mobile update in verification code dialog.
-  if (isMobile && res == true) {
-    await UserModel.updateOtherModels();
-  }
-
-  return res;
-}
-
+/// 로그아웃 확인 다이얼로그
 void logOutConfirmDialog() {
   gFFI.dialogManager.show((setState, close, context) {
-    submit() {
+    void submit() async {
+      // 모든 원격 세션 종료
+      if (isDesktop) {
+        await oneDeskWinManager.closeAllSubWindows();
+      } else {
+        // 모바일에서 활성 세션이 있으면 종료
+        if (gFFI.id.isNotEmpty) {
+          await gFFI.close();
+        }
+      }
+      // CM 창의 모든 연결 종료 (CM 창은 연결이 끊기면 자동으로 닫힘)
+      await gFFI.serverModel.closeAll();
       close();
-      gFFI.userModel.logOut();
+      await gFFI.userModel.logOut();
     }
 
     return CustomAlertDialog(
+      title: Text(
+        translate('Logout'),
+        style: MyTheme.dialogTitleStyle,
+      ),
       content: Text(translate("logout_tip")),
       actions: [
-        dialogButton(translate("Cancel"), onPressed: close, isOutline: true),
-        dialogButton(translate("OK"), onPressed: submit),
+        SizedBox(
+          width: double.infinity,
+          child: Row(
+            children: [
+              Expanded(
+                child: StyledOutlinedButton(
+                  label: translate("Cancel"),
+                  onPressed: close,
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: StyledPrimaryButton(
+                  label: translate("Logout"),
+                  onPressed: submit,
+                  backgroundColor: const Color(0xFFFE3E3E),
+                  hoverBorderColor: const Color(0xFFFE3E3E),
+                ),
+              ),
+            ],
+          ),
+        ),
       ],
       onSubmit: submit,
       onCancel: close,
     );
-  });
+  }, forceGlobal: true);
+}
+
+/// 회원탈퇴 확인 다이얼로그 (1단계)
+void withdrawConfirmDialog() {
+  bool isLoading = false;
+  bool isChecked = false;
+
+  gFFI.dialogManager.show((setState, close, context) {
+
+    void submit() async {
+      setState(() {
+        isLoading = true;
+      });
+
+      // 모든 원격 세션 종료
+      if (isDesktop) {
+        await oneDeskWinManager.closeAllSubWindows();
+      } else {
+        // 모바일에서 활성 세션이 있으면 종료
+        if (gFFI.id.isNotEmpty) {
+          await gFFI.close();
+        }
+      }
+      // CM 창의 모든 연결 종료 (CM 창은 연결이 끊기면 자동으로 닫힘)
+      await gFFI.serverModel.closeAll();
+
+      try {
+        final authService = getAuthService();
+        final response = await authService.signOut('');
+
+        if (response.success) {
+          close();
+          // 탈퇴 성공 다이얼로그 표시
+          _withdrawSuccessDialog();
+        } else {
+          setState(() {
+            isLoading = false;
+          });
+          BotToast.showText(
+            text: response.message ?? translate('Failed to withdraw'),
+            contentColor: Colors.red,
+          );
+        }
+      } catch (e) {
+        setState(() {
+          isLoading = false;
+        });
+        BotToast.showText(
+          text: translate('Failed to withdraw'),
+          contentColor: Colors.red,
+        );
+      }
+    }
+
+    return CustomAlertDialog(
+      title: Text(
+        translate('Withdraw'),
+        style: MyTheme.dialogTitleStyle,
+      ),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // 경고 문구 (빨간색, bold)
+          Text(
+            translate("withdraw_waring"),
+            style: const TextStyle(
+              color: Color(0xFFFE3E3E),
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+          const SizedBox(height: 8),
+          // 안내 문구
+          Text(
+            translate("withdraw_tip"),
+            style: const TextStyle(
+              color: Color(0xFF666666),
+              fontSize: 13,
+            ),
+          ),
+          const SizedBox(height: 16),
+          // 체크박스 (세팅 페이지 스타일)
+          MouseRegion(
+            cursor: SystemMouseCursors.click,
+            child: GestureDetector(
+              onTap: () {
+                setState(() {
+                  isChecked = !isChecked;
+                });
+              },
+              child: Row(
+              children: [
+                Container(
+                  width: 20,
+                  height: 20,
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(4),
+                    border: Border.all(
+                      color: isChecked ? MyTheme.accent : const Color(0xFFCCCCCC),
+                      width: 1.5,
+                    ),
+                    color: isChecked ? MyTheme.accent : Colors.transparent,
+                  ),
+                  child: isChecked
+                      ? const Icon(Icons.check, size: 14, color: Colors.white)
+                      : null,
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    translate("withdraw_confirm"),
+                    style: const TextStyle(fontSize: 13),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          ),
+          if (isLoading) ...[
+            const SizedBox(height: 16),
+            const LinearProgressIndicator(),
+          ],
+        ],
+      ),
+      actions: [
+        SizedBox(
+          width: double.infinity,
+          child: Row(
+            children: [
+              Expanded(
+                child: StyledOutlinedButton(
+                  label: translate("Cancel"),
+                  onPressed: isLoading ? null : close,
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: StyledPrimaryButton(
+                  label: translate("withdraw_sucess"),
+                  onPressed: (isLoading || !isChecked) ? null : submit,
+                  backgroundColor: const Color(0xFFFE3E3E),
+                  hoverBorderColor: const Color(0xFFFE3E3E),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ],
+      onSubmit: (isLoading || !isChecked) ? null : submit,
+      onCancel: isLoading ? null : close,
+    );
+  }, forceGlobal: true);
+}
+
+/// 회원탈퇴 성공 다이얼로그 (2단계)
+void _withdrawSuccessDialog() {
+  gFFI.dialogManager.show((setState, close, context) {
+    void submit() async {
+      close();
+      // 로그아웃 처리 후 로그인 화면으로
+      await gFFI.userModel.logOut();
+    }
+
+    return CustomAlertDialog(
+      title: Text(
+        translate('withdraw_sucess_title'),
+        style: MyTheme.dialogTitleStyle,
+      ),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // 완료 문구 (파란색, bold)
+          Text(
+            translate("withdraw_sucess_waring"),
+            style: const TextStyle(
+              color: Color(0xFF5F71FF),
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+          const SizedBox(height: 12),
+          // 안내 문구 (위 텍스트와 동일한 크기)
+          Text(
+            translate("withdraw_sucess_tip"),
+            style: const TextStyle(
+              color: Color(0xFF666666),
+            ),
+          ),
+        ],
+      ),
+      actions: [
+        SizedBox(
+          width: double.infinity,
+          child: StyledPrimaryButton(
+            label: translate("OK"),
+            onPressed: submit,
+            backgroundColor: const Color(0xFF5F71FF),
+          ),
+        ),
+      ],
+      onSubmit: submit,
+    );
+  }, forceGlobal: true);
 }

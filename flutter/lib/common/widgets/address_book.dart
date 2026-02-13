@@ -668,8 +668,13 @@ class _AddressBookState extends State<AddressBook> {
           ],
         ),
         actions: [
-          dialogButton("Cancel", onPressed: close, isOutline: true),
-          dialogButton("OK", onPressed: submit),
+          Row(
+            children: [
+              Expanded(child: dialogButton("Cancel", onPressed: close, isOutline: true)),
+              const SizedBox(width: 12),
+              Expanded(child: dialogButton("OK", onPressed: submit)),
+            ],
+          ),
         ],
         onSubmit: submit,
         onCancel: close,
@@ -739,8 +744,13 @@ class _AddressBookState extends State<AddressBook> {
           ],
         ),
         actions: [
-          dialogButton("Cancel", onPressed: close, isOutline: true),
-          dialogButton("OK", onPressed: submit),
+          Row(
+            children: [
+              Expanded(child: dialogButton("Cancel", onPressed: close, isOutline: true)),
+              const SizedBox(width: 12),
+              Expanded(child: dialogButton("OK", onPressed: submit)),
+            ],
+          ),
         ],
         onSubmit: submit,
         onCancel: close,

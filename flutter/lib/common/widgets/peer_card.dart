@@ -1,7 +1,9 @@
 import 'package:bot_toast/bot_toast.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_svg/flutter_svg.dart';
 import 'package:flutter_hbb/common/widgets/dialog.dart';
+import 'package:flutter_hbb/common/widgets/status_badge.dart';
 import 'package:flutter_hbb/consts.dart';
 import 'package:flutter_hbb/models/peer_tab_model.dart';
 import 'package:flutter_hbb/models/state_model.dart';
@@ -19,17 +21,25 @@ import 'dart:math' as math;
 typedef PopupMenuEntryBuilder = Future<List<mod_menu.PopupMenuEntry<String>>>
     Function(BuildContext);
 
+/// 피어 카드 표시 타입
+/// Peer card display type
 enum PeerUiType { grid, tile, list }
 
+/// 현재 선택된 UI 타입 (기본: grid)
+/// Currently selected UI type (default: grid)
 final peerCardUiType = PeerUiType.grid.obs;
 
+/// 카드에서 사용자 이름을 숨길지 여부
+/// Whether to hide username on card
 bool? hideUsernameOnCard;
 
+/// 피어 카드 위젯 (원격 PC 접속 카드)
+/// Peer card widget (remote PC connection card)
 class _PeerCard extends StatefulWidget {
-  final Peer peer;
-  final PeerTabIndex tab;
-  final Function(BuildContext, String) connect;
-  final PopupMenuEntryBuilder popupMenuEntryBuilder;
+  final Peer peer; // 피어 정보 (ID, 이름, 상태 등)
+  final PeerTabIndex tab; // 현재 탭 (최근 접속, 즐겨찾기 등)
+  final Function(BuildContext, String) connect; // 접속 함수
+  final PopupMenuEntryBuilder popupMenuEntryBuilder; // 우클릭 메뉴
 
   const _PeerCard(
       {required this.peer,
@@ -43,87 +53,200 @@ class _PeerCard extends StatefulWidget {
   _PeerCardState createState() => _PeerCardState();
 }
 
-/// State for the connection page.
+/// 피어 카드 State 클래스
+/// Peer card state class
 class _PeerCardState extends State<_PeerCard>
     with AutomaticKeepAliveClientMixin {
-  var _menuPos = RelativeRect.fill;
-  final double _cardRadius = 16;
-  final double _tileRadius = 5;
-  final double _borderWidth = 2;
+  var _menuPos = RelativeRect.fill; // 팝업 메뉴 위치
+  final double _tileRadius = 5; // 타일/리스트 모서리 반경
 
   @override
   Widget build(BuildContext context) {
     super.build(context);
+    // 세로/가로 모드에 따라 다른 레이아웃 표시
     return Obx(() =>
         stateGlobal.isPortrait.isTrue ? _buildPortrait() : _buildLandscape());
   }
 
+  /// 제스처 감지 래퍼 (클릭, 더블클릭, 길게 누르기)
+  /// Gesture detector wrapper (click, double-click, long-press)
   Widget gestureDetector({required Widget child}) {
     final PeerTabModel peerTabModel = Provider.of(context);
     final peer = super.widget.peer;
     return GestureDetector(
         onDoubleTap: peerTabModel.multiSelectionMode
             ? null
-            : () => widget.connect(context, peer.id),
+            : () => widget.connect(context, peer.id), // 더블클릭: 접속
         onTap: () {
           if (peerTabModel.multiSelectionMode) {
-            peerTabModel.select(peer);
+            peerTabModel.select(peer); // 다중 선택 모드: 선택/해제
           } else {
             if (isMobile) {
-              widget.connect(context, peer.id);
+              widget.connect(context, peer.id); // 모바일: 한 번 클릭으로 접속
             } else {
-              peerTabModel.select(peer);
+              peerTabModel.select(peer); // 데스크톱: 선택
             }
           }
         },
-        onLongPress: () => peerTabModel.select(peer),
+        onLongPress: () => peerTabModel.select(peer), // 길게 누르기: 선택
         child: child);
   }
 
+  /// 세로 모드 레이아웃 (모바일)
+  /// Portrait mode layout (mobile)
   Widget _buildPortrait() {
     final peer = super.widget.peer;
     return Card(
         margin: EdgeInsets.symmetric(horizontal: 2),
+        elevation: 0,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(16),
+          side: const BorderSide(color: Color(0xFFF2F1F6), width: 1),
+        ),
+        color: Colors.transparent,
         child: gestureDetector(
           child: Container(
-              padding: EdgeInsets.only(left: 12, top: 8, bottom: 8),
-              child: _buildPeerTile(context, peer, null)),
+              padding: EdgeInsets.only(left: 0, top: 0, bottom: 0),
+              child: _buildMobilePeerTile(context, peer)),
         ));
   }
 
+  /// 모바일 전용 피어 타일 빌드
+  /// Mobile-specific peer tile build
+  Widget _buildMobilePeerTile(BuildContext context, Peer peer) {
+    hideUsernameOnCard ??=
+        bind.mainGetBuildinOption(key: kHideUsernameOnCard) == 'Y';
+    final name = hideUsernameOnCard == true
+        ? peer.hostname
+        : '${peer.username}${peer.username.isNotEmpty && peer.hostname.isNotEmpty ? '@' : ''}${peer.hostname}';
+
+    const leftBgColor = Color(0xFFEFF1FF); // 왼쪽: 연보라색
+    const rightBgColor = Color(0xFFFEFEFE); // 오른쪽: 흰색
+    const logoColor = Color(0xFF5F71FF);
+    const codeTextColor = Color(0xFF646368);
+    const otherTextColor = Color(0xFF8F8E95);
+
+    return Row(
+      mainAxisSize: MainAxisSize.max,
+      children: [
+        // 왼쪽: 시스템 로고 영역
+        Container(
+          decoration: const BoxDecoration(
+            color: leftBgColor,
+            borderRadius: BorderRadius.only(
+              topLeft: Radius.circular(16),
+              bottomLeft: Radius.circular(16),
+            ),
+          ),
+          alignment: Alignment.center,
+          width: 80,
+          height: 80,
+          child: Stack(
+            children: [
+              ColorFiltered(
+                colorFilter: const ColorFilter.mode(
+                  logoColor,
+                  BlendMode.srcIn,
+                ),
+                child: getPlatformImage(peer.platform, size: 30),
+              ).paddingAll(6),
+              if (_shouldBuildPasswordIcon(peer))
+                Positioned(
+                  top: 1,
+                  left: 1,
+                  child: Icon(Icons.key, size: 6, color: Colors.white),
+                ),
+            ],
+          ),
+        ),
+        // 오른쪽: 정보 영역
+        Expanded(
+          child: Container(
+            height: 80,
+            decoration: const BoxDecoration(
+              color: rightBgColor,
+              borderRadius: BorderRadius.only(
+                topRight: Radius.circular(16),
+                bottomRight: Radius.circular(16),
+              ),
+            ),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      // 코드 (ID)
+                      Row(children: [
+                        getOnline(4, peer.online),
+                        Expanded(
+                          child: Text(
+                            '[${peer.alias.isEmpty ? formatID(peer.id) : peer.alias}]',
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                              fontSize: 15,
+                              fontWeight: FontWeight.w600,
+                              color: codeTextColor,
+                            ),
+                          ),
+                        ),
+                      ]),
+                      const SizedBox(height: 2),
+                      // 사용자명@호스트명
+                      Text(
+                        '[$name]',
+                        style: const TextStyle(
+                          fontSize: 15,
+                          color: otherTextColor,
+                        ),
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ],
+                  ),
+                ),
+                checkBoxOrActionMorePortrait(peer),
+              ],
+            ).paddingSymmetric(horizontal: 12.0),
+          ),
+        )
+      ],
+    );
+  }
+
+  /// 가로 모드 레이아웃 (데스크톱)
+  /// Landscape mode layout (desktop)
   Widget _buildLandscape() {
     final peer = super.widget.peer;
+    final theme = MyTheme.peerCard(context);
+    // 호버 시 테두리 효과
     var deco = Rx<BoxDecoration?>(
       BoxDecoration(
-        border: Border.all(color: Colors.transparent, width: _borderWidth),
-        borderRadius: BorderRadius.circular(
-          peerCardUiType.value == PeerUiType.grid ? _cardRadius : _tileRadius,
-        ),
+        border: Border.all(color: Colors.transparent, width: theme.borderWidth),
+        borderRadius: BorderRadius.circular(theme.cardRadius),
       ),
     );
     return MouseRegion(
       onEnter: (evt) {
+        // 마우스 진입: 파란 테두리 표시
         deco.value = BoxDecoration(
           border: Border.all(
-              color: Theme.of(context).colorScheme.primary,
-              width: _borderWidth),
-          borderRadius: BorderRadius.circular(
-            peerCardUiType.value == PeerUiType.grid ? _cardRadius : _tileRadius,
-          ),
+              color: theme.hoverBorderColor, width: theme.borderWidth),
+          borderRadius: BorderRadius.circular(theme.cardRadius),
         );
       },
       onExit: (evt) {
+        // 마우스 나감: 테두리 제거
         deco.value = BoxDecoration(
-          border: Border.all(color: Colors.transparent, width: _borderWidth),
-          borderRadius: BorderRadius.circular(
-            peerCardUiType.value == PeerUiType.grid ? _cardRadius : _tileRadius,
-          ),
+          border:
+              Border.all(color: Colors.transparent, width: theme.borderWidth),
+          borderRadius: BorderRadius.circular(theme.cardRadius),
         );
       },
       child: gestureDetector(
           child: Obx(() => peerCardUiType.value == PeerUiType.grid
-              ? _buildPeerCard(context, peer, deco)
-              : _buildPeerTile(context, peer, deco))),
+              ? _buildPeerCard(context, peer, deco) // 그리드 카드 (큰 카드)
+              : _buildPeerTile(context, peer, deco))), // 타일/리스트 (작은 카드)
     );
   }
 
@@ -131,13 +254,10 @@ class _PeerCardState extends State<_PeerCard>
     return peerTabShowNote(widget.tab) && peer.note.isNotEmpty;
   }
 
-  makeChild(bool isPortrait, Peer peer) {
+  makeChild(bool isPortrait, Peer peer, PeerCardTheme theme) {
     final name = hideUsernameOnCard == true
         ? peer.hostname
         : '${peer.username}${peer.username.isNotEmpty && peer.hostname.isNotEmpty ? '@' : ''}${peer.hostname}';
-    final greyStyle = TextStyle(
-        fontSize: 11,
-        color: Theme.of(context).textTheme.titleLarge?.color?.withOpacity(0.6));
     final showNote = _showNote(peer);
 
     return Row(
@@ -145,21 +265,31 @@ class _PeerCardState extends State<_PeerCard>
       children: [
         Container(
             decoration: BoxDecoration(
-              color: str2color('${peer.id}${peer.platform}', 0x7f),
+              // 그리드 뷰와 동일한 배경색 적용
+              // Apply same background color as grid view
+              color: theme.topBackgroundColor,
               borderRadius: isPortrait
                   ? BorderRadius.circular(_tileRadius)
                   : BorderRadius.only(
-                      topLeft: Radius.circular(_tileRadius),
-                      bottomLeft: Radius.circular(_tileRadius),
+                      topLeft: Radius.circular(theme.cardRadius),
+                      bottomLeft: Radius.circular(theme.cardRadius),
                     ),
             ),
             alignment: Alignment.center,
-            width: isPortrait ? 50 : 42,
+            width: isPortrait ? 50 : 80,
             height: isPortrait ? 50 : null,
             child: Stack(
               children: [
-                getPlatformImage(peer.platform, size: isPortrait ? 38 : 30)
-                    .paddingAll(6),
+                // 시스템 아이콘에 보라색 적용 (grid와 동일)
+                // Apply purple color to system icon (same as grid)
+                ColorFiltered(
+                  colorFilter: ColorFilter.mode(
+                    theme.accentColor,
+                    BlendMode.srcIn,
+                  ),
+                  child: getPlatformImage(peer.platform,
+                      size: isPortrait ? 38 : 32),
+                ).paddingAll(6),
                 if (_shouldBuildPasswordIcon(peer))
                   Positioned(
                     top: 1,
@@ -171,26 +301,36 @@ class _PeerCardState extends State<_PeerCard>
         Expanded(
           child: Container(
             decoration: BoxDecoration(
-              color: Theme.of(context).colorScheme.background,
+              color: theme.bottomBackgroundColor,
+              border: Border.all(
+                color: theme.borderColor,
+                width: 1,
+              ),
               borderRadius: BorderRadius.only(
-                topRight: Radius.circular(_tileRadius),
-                bottomRight: Radius.circular(_tileRadius),
+                topRight: Radius.circular(theme.cardRadius),
+                bottomRight: Radius.circular(theme.cardRadius),
               ),
             ),
             child: Row(
               children: [
                 Expanded(
                   child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Row(children: [
                         getOnline(isPortrait ? 4 : 8, peer.online),
                         Expanded(
                             child: Text(
-                          peer.alias.isEmpty ? formatID(peer.id) : peer.alias,
+                          '[${peer.alias.isEmpty ? formatID(peer.id) : peer.alias}]',
                           overflow: TextOverflow.ellipsis,
-                          style: Theme.of(context).textTheme.titleSmall,
+                          style: const TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.w600,
+                          ),
                         )),
-                      ]).marginOnly(top: isPortrait ? 0 : 2),
+                      ]),
+                      const SizedBox(height: 4),
                       Row(
                         children: [
                           Flexible(
@@ -200,8 +340,10 @@ class _PeerCardState extends State<_PeerCard>
                               child: Align(
                                 alignment: Alignment.centerLeft,
                                 child: Text(
-                                  name,
-                                  style: isPortrait ? null : greyStyle,
+                                  '[$name]',
+                                  style: const TextStyle(
+                                    fontSize: 16,
+                                  ),
                                   textAlign: TextAlign.start,
                                   overflow: TextOverflow.ellipsis,
                                 ),
@@ -217,7 +359,10 @@ class _PeerCardState extends State<_PeerCard>
                                   alignment: Alignment.centerLeft,
                                   child: Text(
                                     peer.note,
-                                    style: isPortrait ? null : greyStyle,
+                                    style: TextStyle(
+                                      fontSize: 12,
+                                      color: theme.noteTextColor,
+                                    ),
                                     textAlign: TextAlign.start,
                                     overflow: TextOverflow.ellipsis,
                                   ).marginOnly(
@@ -231,13 +376,13 @@ class _PeerCardState extends State<_PeerCard>
                         ],
                       ),
                     ],
-                  ).marginOnly(top: 2),
+                  ),
                 ),
                 isPortrait
                     ? checkBoxOrActionMorePortrait(peer)
                     : checkBoxOrActionMoreLandscape(peer, isTile: true),
               ],
-            ).paddingOnly(left: 10.0, top: 3.0),
+            ).paddingSymmetric(horizontal: 12.0),
           ),
         )
       ],
@@ -248,6 +393,7 @@ class _PeerCardState extends State<_PeerCard>
       BuildContext context, Peer peer, Rx<BoxDecoration?>? deco) {
     hideUsernameOnCard ??=
         bind.mainGetBuildinOption(key: kHideUsernameOnCard) == 'Y';
+    final theme = MyTheme.peerCard(context);
     final colors = _frontN(peer.tags, 25)
         .map((e) => gFFI.abModel.getCurrentAbTagColor(e))
         .toList();
@@ -260,10 +406,10 @@ class _PeerCardState extends State<_PeerCard>
       child: Stack(children: [
         Obx(
           () => deco == null
-              ? makeChild(stateGlobal.isPortrait.isTrue, peer)
+              ? makeChild(stateGlobal.isPortrait.isTrue, peer, theme)
               : Container(
                   foregroundDecoration: deco.value,
-                  child: makeChild(stateGlobal.isPortrait.isTrue, peer),
+                  child: makeChild(stateGlobal.isPortrait.isTrue, peer, theme),
                 ),
         ),
         if (colors.isNotEmpty)
@@ -278,10 +424,43 @@ class _PeerCardState extends State<_PeerCard>
     );
   }
 
+  String _getPlatformDisplayName(String platform) {
+    if (platform.isEmpty) return '';
+    if (platform.toLowerCase().contains('windows') ||
+        platform == kPeerPlatformWindows) {
+      return 'Windows';
+    } else if (platform == kPeerPlatformMacOS ||
+        platform.toLowerCase().contains('mac')) {
+      return 'macOS';
+    } else if (platform == kPeerPlatformLinux ||
+        platform.toLowerCase().contains('linux')) {
+      return 'Linux';
+    } else if (platform == kPeerPlatformAndroid ||
+        platform.toLowerCase().contains('android')) {
+      return 'Android';
+    }
+    return platform;
+  }
+
+  /// 그리드 카드 빌드 (큰 카드 레이아웃)
+  /// Build grid card (large card layout)
+  ///
+  /// 구조:
+  /// ┌─────────────────┐
+  /// │ [접속 가능]     │ <- 상태 배지
+  /// │                 │
+  /// │  🪟 Windows 11  │ <- 아이콘 + OS 버전
+  /// │  [rncpe@toho]   │ <- 사용자@호스트명
+  /// │                 │
+  /// ├─────────────────┤
+  /// │ [332 448 650]   │ <- ID (하단 영역)
+  /// └─────────────────┘
   Widget _buildPeerCard(
       BuildContext context, Peer peer, Rx<BoxDecoration?> deco) {
     hideUsernameOnCard ??=
         bind.mainGetBuildinOption(key: kHideUsernameOnCard) == 'Y';
+    final theme = MyTheme.peerCard(context);
+    // 사용자@호스트명 형식 (예: rncpe@toho)
     final name = hideUsernameOnCard == true
         ? peer.hostname
         : '${peer.username}${peer.username.isNotEmpty && peer.hostname.isNotEmpty ? '@' : ''}${peer.hostname}';
@@ -289,90 +468,124 @@ class _PeerCardState extends State<_PeerCard>
       color: Colors.transparent,
       elevation: 0,
       margin: EdgeInsets.zero,
-      // to-do: memory leak here, more investigation needed.
-      // Continious rebuilds of `Obx()` will cause memory leak here.
-      // The simple demo does not have this issue.
       child: Obx(
         () => Container(
-          foregroundDecoration: deco.value,
+          foregroundDecoration: deco.value, // 호버 테두리 효과
           child: ClipRRect(
-            borderRadius: BorderRadius.circular(_cardRadius - _borderWidth),
+            borderRadius:
+                BorderRadius.circular(theme.cardRadius - theme.borderWidth),
             child: Column(
               mainAxisSize: MainAxisSize.min,
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
+                // 상단 영역 (상태, 아이콘, 이름)
                 Expanded(
                   child: Container(
-                    color: str2color('${peer.id}${peer.platform}', 0x7f),
-                    child: Row(
+                    color: theme.topBackgroundColor, // 연한 파랑 배경
+                    child: Stack(
                       children: [
-                        Expanded(
+                        // 상태 배지 (좌측 상단) - "접속 가능" 또는 "Offline"
+                        Positioned(
+                          top: 16,
+                          left: 16,
+                          child: StatusBadge(
+                            isOnline: peer.online,
+                            fontSize: 15,
+                            dotSize: 8,
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 12, vertical: 6),
+                          ),
+                        ),
+                        // 중앙 콘텐츠
+                        Center(
                           child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.center,
+                            mainAxisAlignment: MainAxisAlignment.center,
                             children: [
-                              Container(
-                                padding: const EdgeInsets.all(6),
-                                child:
-                                    getPlatformImage(peer.platform, size: 60),
-                              ),
+                              const SizedBox(height: 24),
+                              // OS 아이콘 + OS 버전
                               Row(
+                                mainAxisAlignment: MainAxisAlignment.center,
+                                mainAxisSize: MainAxisSize.min,
                                 children: [
-                                  Expanded(
-                                    child: Tooltip(
-                                      message: name,
-                                      waitDuration: const Duration(seconds: 1),
-                                      child: Text(
-                                        name,
-                                        style: const TextStyle(
-                                            color: Colors.white70,
-                                            fontSize: 12),
-                                        textAlign: TextAlign.center,
-                                        overflow: TextOverflow.ellipsis,
-                                      ),
+                                  // OS 아이콘 (Windows, macOS, Linux 등)
+                                  ColorFiltered(
+                                    colorFilter: ColorFilter.mode(
+                                      theme.accentColor, // 보라색
+                                      BlendMode.srcIn,
+                                    ),
+                                    child: getPlatformImage(peer.platform,
+                                        size: 32),
+                                  ),
+                                  const SizedBox(width: 8),
+                                  // OS 버전 텍스트 (예: "Windows 11 Pro")
+                                  Text(
+                                    peer.osVersion.isNotEmpty
+                                        ? peer.osVersion
+                                        : _getPlatformDisplayName(
+                                            peer.platform),
+                                    style: TextStyle(
+                                      color: theme.accentColor,
+                                      fontSize: 20,
+                                      fontWeight: FontWeight.w600,
                                     ),
                                   ),
                                 ],
                               ),
+                              const SizedBox(height: 10),
+                              // 사용자@호스트명 (예: [rncpe@toho])
+                              Tooltip(
+                                message: name,
+                                waitDuration: const Duration(seconds: 1),
+                                child: Text(
+                                  '[$name]',
+                                  style: TextStyle(
+                                      color: theme.accentColor, fontSize: 16),
+                                  textAlign: TextAlign.center,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ),
+                              // 노트 (메모) - 있으면 표시
                               if (_showNote(peer))
-                                Row(
-                                  children: [
-                                    Expanded(
-                                        child: Tooltip(
-                                      message: peer.note,
-                                      waitDuration: const Duration(seconds: 1),
-                                      child: Text(
-                                        peer.note,
-                                        style: const TextStyle(
-                                            color: Colors.white38,
-                                            fontSize: 10),
-                                        textAlign: TextAlign.center,
-                                        overflow: TextOverflow.ellipsis,
-                                      ),
-                                    ))
-                                  ],
+                                Tooltip(
+                                  message: peer.note,
+                                  waitDuration: const Duration(seconds: 1),
+                                  child: Text(
+                                    peer.note,
+                                    style: TextStyle(
+                                        color: theme.noteTextColor,
+                                        fontSize: 12),
+                                    textAlign: TextAlign.center,
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
                                 ),
                             ],
-                          ).paddingOnly(top: 4.0, left: 4.0, right: 4.0),
+                          ),
                         ),
                       ],
                     ),
                   ),
                 ),
+                // 하단 영역 (ID 또는 별칭 + 메뉴 버튼)
                 Container(
-                  color: Theme.of(context).colorScheme.background,
+                  height: 50,
+                  decoration: BoxDecoration(
+                    color: theme.bottomBackgroundColor, // 메인 배경색
+                    border: Border.all(
+                      color: theme.borderColor,
+                      width: 1,
+                    ),
+                  ),
                   child: Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
+                      // ID 또는 별칭 (예: [332 448 650])
                       Expanded(
-                          child: Row(children: [
-                        getOnline(8, peer.online),
-                        Expanded(
-                            child: Text(
-                          peer.alias.isEmpty ? formatID(peer.id) : peer.alias,
-                          overflow: TextOverflow.ellipsis,
-                          style: Theme.of(context).textTheme.titleSmall,
-                        )),
-                      ]).paddingSymmetric(vertical: 8)),
+                          child: Text(
+                        '[${peer.alias.isEmpty ? formatID(peer.id) : peer.alias}]',
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(fontSize: 16),
+                      )),
+                      // 체크박스 또는 더보기 버튼 (...)
                       checkBoxOrActionMoreLandscape(peer, isTile: false),
                     ],
                   ).paddingSymmetric(horizontal: 12.0),
@@ -434,8 +647,13 @@ class _PeerCardState extends State<_PeerCard>
       );
     } else {
       return InkWell(
-          child: const Padding(
-              padding: EdgeInsets.all(12), child: Icon(Icons.more_vert)),
+          child: Padding(
+              padding: const EdgeInsets.all(12),
+              child: SvgPicture.asset(
+                'assets/icons/peercard-vdot.svg',
+                width: 20,
+                height: 20,
+              )),
           onTapDown: (e) {
             final x = e.globalPosition.dx;
             final y = e.globalPosition.dy;
@@ -528,10 +746,15 @@ abstract class BasePeerCard extends StatelessWidget {
       (await _buildMenuItems(context))
           .map((e) => e.build(
               context,
-              const MenuConfig(
+              MenuConfig(
                   commonColor: CustomPopupMenuTheme.commonColor,
-                  height: CustomPopupMenuTheme.height,
-                  dividerHeight: CustomPopupMenuTheme.dividerHeight)))
+                  // 모바일: 연결카드 팝업메뉴와 동일한 스타일
+                  // Mobile: same style as connection card popup menu
+                  height: isMobile ? 48.0 : CustomPopupMenuTheme.height,
+                  dividerHeight: isMobile ? 8.0 : CustomPopupMenuTheme.dividerHeight,
+                  fontSize: isMobile ? 16.0 : MenuConfig.defaultFontSize,
+                  // 모바일: 패딩을 0으로 설정하여 테스트
+                  menuItemPadding: isMobile ? EdgeInsets.zero : null)))
           .expand((i) => i)
           .toList();
 
@@ -784,21 +1007,9 @@ abstract class BasePeerCard extends StatelessWidget {
   @protected
   MenuEntryBase<String> _removeAction(String id) {
     return MenuEntryButton<String>(
-      childBuilder: (TextStyle? style) => Row(
-        children: [
-          Text(
-            translate('Delete'),
-            style: style?.copyWith(color: Colors.red),
-          ),
-          Expanded(
-              child: Align(
-            alignment: Alignment.centerRight,
-            child: Transform.scale(
-              scale: 0.8,
-              child: Icon(Icons.delete_forever, color: Colors.red),
-            ),
-          ).marginOnly(right: 4)),
-        ],
+      childBuilder: (TextStyle? style) => Text(
+        translate('Delete'),
+        style: style?.copyWith(color: Colors.red),
       ),
       proc: () {
         onSubmit() async {
@@ -830,7 +1041,7 @@ abstract class BasePeerCard extends StatelessWidget {
         }
 
         deleteConfirmDialog(onSubmit,
-            '${translate('Delete')} "${peer.alias.isEmpty ? formatID(peer.id) : peer.alias}"?');
+            peer.alias.isEmpty ? formatID(peer.id) : peer.alias);
       },
       padding: menuPadding,
       dismissOnClicked: true,
@@ -864,21 +1075,9 @@ abstract class BasePeerCard extends StatelessWidget {
   @protected
   MenuEntryBase<String> _addFavAction(String id) {
     return MenuEntryButton<String>(
-      childBuilder: (TextStyle? style) => Row(
-        children: [
-          Text(
-            translate('Add to Favorites'),
-            style: style,
-          ),
-          Expanded(
-              child: Align(
-            alignment: Alignment.centerRight,
-            child: Transform.scale(
-              scale: 0.8,
-              child: Icon(Icons.star_outline),
-            ),
-          ).marginOnly(right: 4)),
-        ],
+      childBuilder: (TextStyle? style) => Text(
+        translate('Add to Favorites'),
+        style: style,
       ),
       proc: () {
         () async {
@@ -899,21 +1098,9 @@ abstract class BasePeerCard extends StatelessWidget {
   MenuEntryBase<String> _rmFavAction(
       String id, Future<void> Function() reloadFunc) {
     return MenuEntryButton<String>(
-      childBuilder: (TextStyle? style) => Row(
-        children: [
-          Text(
-            translate('Remove from Favorites'),
-            style: style,
-          ),
-          Expanded(
-              child: Align(
-            alignment: Alignment.centerRight,
-            child: Transform.scale(
-              scale: 0.8,
-              child: Icon(Icons.star),
-            ),
-          ).marginOnly(right: 4)),
-        ],
+      childBuilder: (TextStyle? style) => Text(
+        translate('Remove from Favorites'),
+        style: style,
       ),
       proc: () {
         () async {
@@ -970,44 +1157,14 @@ class RecentPeerCard extends BasePeerCard {
       _connectAction(context),
       _transferFileAction(context),
       _viewCameraAction(context),
-      _terminalAction(context),
     ];
 
-    if (peer.platform == kPeerPlatformWindows) {
-      menuItems.add(_terminalRunAsAdminAction(context));
-    }
-
     final List favs = (await bind.mainGetFav()).toList();
-
-    if (isDesktop && peer.platform != kPeerPlatformAndroid) {
-      menuItems.add(_tcpTunnelingAction(context));
-    }
-    // menuItems.add(await _openNewConnInOptAction(peer.id));
-    if (!isWeb) {
-      menuItems.add(await _forceAlwaysRelayAction(peer.id));
-    }
-    if (isWindows && peer.platform == kPeerPlatformWindows) {
-      menuItems.add(_rdpAction(context, peer.id));
-    }
-    if (isWindows) {
-      menuItems.add(_createShortCutAction(peer.id));
-    }
-    menuItems.add(MenuEntryDivider());
-    if (isMobile || isDesktop || isWebDesktop) {
-      menuItems.add(_renameAction(peer.id));
-    }
-    if (await bind.mainPeerHasPassword(id: peer.id)) {
-      menuItems.add(_unrememberPasswordAction(peer.id));
-    }
 
     if (!favs.contains(peer.id)) {
       menuItems.add(_addFavAction(peer.id));
     } else {
       menuItems.add(_rmFavAction(peer.id, () async {}));
-    }
-
-    if (gFFI.userModel.userName.isNotEmpty) {
-      menuItems.add(_addToAb(peer));
     }
 
     menuItems.add(MenuEntryDivider());
@@ -1035,40 +1192,11 @@ class FavoritePeerCard extends BasePeerCard {
       _connectAction(context),
       _transferFileAction(context),
       _viewCameraAction(context),
-      _terminalAction(context),
     ];
 
-    if (peer.platform == kPeerPlatformWindows) {
-      menuItems.add(_terminalRunAsAdminAction(context));
-    }
-
-    if (isDesktop && peer.platform != kPeerPlatformAndroid) {
-      menuItems.add(_tcpTunnelingAction(context));
-    }
-    // menuItems.add(await _openNewConnInOptAction(peer.id));
-    if (!isWeb) {
-      menuItems.add(await _forceAlwaysRelayAction(peer.id));
-    }
-    if (isWindows && peer.platform == kPeerPlatformWindows) {
-      menuItems.add(_rdpAction(context, peer.id));
-    }
-    if (isWindows) {
-      menuItems.add(_createShortCutAction(peer.id));
-    }
-    menuItems.add(MenuEntryDivider());
-    if (isMobile || isDesktop || isWebDesktop) {
-      menuItems.add(_renameAction(peer.id));
-    }
-    if (await bind.mainPeerHasPassword(id: peer.id)) {
-      menuItems.add(_unrememberPasswordAction(peer.id));
-    }
     menuItems.add(_rmFavAction(peer.id, () async {
       await bind.mainLoadFavPeers();
     }));
-
-    if (gFFI.userModel.userName.isNotEmpty) {
-      menuItems.add(_addToAb(peer));
-    }
 
     menuItems.add(MenuEntryDivider());
     menuItems.add(_removeAction(peer.id));
@@ -1095,38 +1223,14 @@ class DiscoveredPeerCard extends BasePeerCard {
       _connectAction(context),
       _transferFileAction(context),
       _viewCameraAction(context),
-      _terminalAction(context),
     ];
 
-    if (peer.platform == kPeerPlatformWindows) {
-      menuItems.add(_terminalRunAsAdminAction(context));
-    }
-
     final List favs = (await bind.mainGetFav()).toList();
-
-    if (isDesktop && peer.platform != kPeerPlatformAndroid) {
-      menuItems.add(_tcpTunnelingAction(context));
-    }
-    // menuItems.add(await _openNewConnInOptAction(peer.id));
-    if (!isWeb) {
-      menuItems.add(await _forceAlwaysRelayAction(peer.id));
-    }
-    if (isWindows && peer.platform == kPeerPlatformWindows) {
-      menuItems.add(_rdpAction(context, peer.id));
-    }
-    menuItems.add(_wolAction(peer.id));
-    if (isWindows) {
-      menuItems.add(_createShortCutAction(peer.id));
-    }
 
     if (!favs.contains(peer.id)) {
       menuItems.add(_addFavAction(peer.id));
     } else {
       menuItems.add(_rmFavAction(peer.id, () async {}));
-    }
-
-    if (gFFI.userModel.userName.isNotEmpty) {
-      menuItems.add(_addToAb(peer));
     }
 
     menuItems.add(MenuEntryDivider());
@@ -1154,50 +1258,16 @@ class AddressBookPeerCard extends BasePeerCard {
       _connectAction(context),
       _transferFileAction(context),
       _viewCameraAction(context),
-      _terminalAction(context),
     ];
 
-    if (peer.platform == kPeerPlatformWindows) {
-      menuItems.add(_terminalRunAsAdminAction(context));
+    final List favs = (await bind.mainGetFav()).toList();
+
+    if (!favs.contains(peer.id)) {
+      menuItems.add(_addFavAction(peer.id));
+    } else {
+      menuItems.add(_rmFavAction(peer.id, () async {}));
     }
 
-    if (isDesktop && peer.platform != kPeerPlatformAndroid) {
-      menuItems.add(_tcpTunnelingAction(context));
-    }
-    // menuItems.add(await _openNewConnInOptAction(peer.id));
-    if (!isWeb) {
-      menuItems.add(await _forceAlwaysRelayAction(peer.id));
-    }
-    if (isWindows && peer.platform == kPeerPlatformWindows) {
-      menuItems.add(_rdpAction(context, peer.id));
-    }
-    if (isWindows) {
-      menuItems.add(_createShortCutAction(peer.id));
-    }
-    if (gFFI.abModel.current.canWrite()) {
-      menuItems.add(MenuEntryDivider());
-      if (isMobile || isDesktop || isWebDesktop) {
-        menuItems.add(_renameAction(peer.id));
-      }
-      if (gFFI.abModel.current.isPersonal() && peer.hash.isNotEmpty) {
-        menuItems.add(_unrememberPasswordAction(peer.id));
-      }
-      if (!gFFI.abModel.current.isPersonal()) {
-        menuItems.add(_changeSharedAbPassword());
-      }
-      if (gFFI.abModel.currentAbTags.isNotEmpty) {
-        menuItems.add(_editTagAction(peer.id));
-      }
-      menuItems.add(_editNoteAction(peer.id));
-    }
-    final addressbooks = gFFI.abModel.addressBooksCanWrite();
-    if (gFFI.peerTabModel.currentTab == PeerTabIndex.ab.index) {
-      addressbooks.remove(gFFI.abModel.currentName.value);
-    }
-    if (addressbooks.isNotEmpty) {
-      menuItems.add(_addToAb(peer));
-    }
-    menuItems.add(_existIn());
     if (gFFI.abModel.current.canWrite()) {
       menuItems.add(MenuEntryDivider());
       menuItems.add(_removeAction(peer.id));
@@ -1311,34 +1381,16 @@ class MyGroupPeerCard extends BasePeerCard {
       _connectAction(context),
       _transferFileAction(context),
       _viewCameraAction(context),
-      _terminalAction(context),
     ];
 
-    if (peer.platform == kPeerPlatformWindows) {
-      menuItems.add(_terminalRunAsAdminAction(context));
+    final List favs = (await bind.mainGetFav()).toList();
+
+    if (!favs.contains(peer.id)) {
+      menuItems.add(_addFavAction(peer.id));
+    } else {
+      menuItems.add(_rmFavAction(peer.id, () async {}));
     }
 
-    if (isDesktop && peer.platform != kPeerPlatformAndroid) {
-      menuItems.add(_tcpTunnelingAction(context));
-    }
-    // menuItems.add(await _openNewConnInOptAction(peer.id));
-    if (!isWeb) {
-      menuItems.add(await _forceAlwaysRelayAction(peer.id));
-    }
-    if (isWindows && peer.platform == kPeerPlatformWindows) {
-      menuItems.add(_rdpAction(context, peer.id));
-    }
-    if (isWindows) {
-      menuItems.add(_createShortCutAction(peer.id));
-    }
-    // menuItems.add(MenuEntryDivider());
-    // menuItems.add(_renameAction(peer.id));
-    // if (await bind.mainPeerHasPassword(id: peer.id)) {
-    //   menuItems.add(_unrememberPasswordAction(peer.id));
-    // }
-    if (gFFI.userModel.userName.isNotEmpty) {
-      menuItems.add(_addToAb(peer));
-    }
     return menuItems;
   }
 
@@ -1455,8 +1507,15 @@ void _rdpDialog(String id) async {
         ),
       ),
       actions: [
-        dialogButton("Cancel", onPressed: close, isOutline: true),
-        dialogButton("OK", onPressed: submit),
+        Row(
+          children: [
+            Expanded(
+                child:
+                    dialogButton("Cancel", onPressed: close, isOutline: true)),
+            const SizedBox(width: 12),
+            Expanded(child: dialogButton("OK", onPressed: submit)),
+          ],
+        ),
       ],
       onSubmit: submit,
       onCancel: close,
@@ -1471,7 +1530,7 @@ Widget getOnline(double rightPadding, bool online) {
       child: Padding(
           padding: EdgeInsets.fromLTRB(0, 4, rightPadding, 4),
           child: CircleAvatar(
-              radius: 3, backgroundColor: online ? Colors.green : kColorWarn)));
+              radius: 4, backgroundColor: online ? Colors.green : kColorWarn)));
 }
 
 Widget build_more(BuildContext context, {bool invert = false}) {
@@ -1482,22 +1541,18 @@ Widget build_more(BuildContext context, {bool invert = false}) {
       onHover: (value) => hover.value = value,
       child: Obx(() => CircleAvatar(
           radius: 14,
-          backgroundColor: hover.value
-              ? (invert
-                  ? Theme.of(context).colorScheme.background
-                  : Theme.of(context).scaffoldBackgroundColor)
-              : (invert
-                  ? Theme.of(context).scaffoldBackgroundColor
-                  : Theme.of(context).colorScheme.background),
-          child: Icon(Icons.more_vert,
-              size: 18,
-              color: hover.value
-                  ? Theme.of(context).textTheme.titleLarge?.color
-                  : Theme.of(context)
-                      .textTheme
-                      .titleLarge
-                      ?.color
-                      ?.withOpacity(0.5)))));
+          backgroundColor: Colors.transparent,
+          child: SvgPicture.asset('assets/icons/peercard-vdot.svg',
+              width: 24,
+              height: 24,
+              colorFilter: ColorFilter.mode(
+                  hover.value
+                      ? Theme.of(context).textTheme.titleLarge?.color ??
+                          Colors.black
+                      : (Theme.of(context).textTheme.titleLarge?.color ??
+                              Colors.black)
+                          .withOpacity(0.5),
+                  BlendMode.srcIn)))));
 }
 
 class TagPainter extends CustomPainter {

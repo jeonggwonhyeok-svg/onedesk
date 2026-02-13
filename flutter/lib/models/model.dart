@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io' show Directory, Platform;
 import 'dart:math';
 import 'dart:typed_data';
 import 'dart:ui' as ui;
@@ -451,7 +452,14 @@ class FfiModel with ChangeNotifier {
         if (desktopType == DesktopType.remote ||
             desktopType == DesktopType.viewCamera ||
             isMobile) {
-          parent.target?.recordingModel.updateStatus(evt['start'] == 'true');
+          final isStart = evt['start'] == 'true';
+          final wasRecording = parent.target?.recordingModel.start ?? false;
+          parent.target?.recordingModel.updateStatus(isStart);
+          // 녹화 중지 시 토스트 표시 (발신 녹화)
+          if (wasRecording && !isStart) {
+            final videoDir = bind.mainVideoSaveDirectory(root: false);
+            showFileSavedToast('녹화 파일이 저장되었습니다.', videoDir);
+          }
         }
       } else if (name == "printer_request") {
         _handlePrinterRequest(evt, sessionId, peerId);
@@ -474,60 +482,49 @@ class FfiModel with ChangeNotifier {
     if (msg.isNotEmpty) {
       msgBox(sessionId, msgBoxType, msgBoxTitle, msg, '', dialogManager);
     } else {
-      final msgBoxText = 'screenshot-action-tip';
-
-      close() {
-        dialogManager.dismissAll();
-      }
-
-      saveAs() {
-        close();
-        Future.delayed(Duration.zero, () async {
-          final ts = DateTime.now().millisecondsSinceEpoch ~/ 1000;
-          String? outputFile = await FilePicker.platform.saveFile(
-            dialogTitle: '${translate('Save as')}...',
-            fileName: 'screenshot_$ts.png',
-            allowedExtensions: ['png'],
-            type: FileType.custom,
-          );
-          if (outputFile == null) {
-            bind.sessionHandleScreenshot(sessionId: sessionId, action: '2');
-          } else {
-            final res = await bind.sessionHandleScreenshot(
-                sessionId: sessionId, action: '0:$outputFile');
-            if (res.isNotEmpty) {
-              msgBox(sessionId, 'custom-nook-nocancel-hasclose-error',
-                  'Take screenshot', res, '', dialogManager);
+      // 자동으로 설정된 경로에 저장
+      Future.delayed(Duration.zero, () async {
+        try {
+          String screenshotDir;
+          if (Platform.isAndroid) {
+            // Android: Rust .so의 screenshot_save_directory()에 Android 경로가 없으므로
+            // video_save_directory()에서 base 경로를 추출하여 Screenshot 폴더 생성
+            final videoDir = bind.mainVideoSaveDirectory(root: false);
+            debugPrint('[Screenshot] videoDir: $videoDir');
+            final idx = videoDir.indexOf('/ScreenRecord/');
+            if (idx > 0) {
+              screenshotDir = '${videoDir.substring(0, idx)}/Screenshot';
+            } else {
+              screenshotDir = '$videoDir/Screenshot';
             }
+            debugPrint('[Screenshot] screenshotDir: $screenshotDir');
+            final dir = Directory(screenshotDir);
+            if (!await dir.exists()) {
+              await dir.create(recursive: true);
+            }
+          } else {
+            screenshotDir = bind.mainScreenshotSaveDirectory();
           }
-        });
-      }
-
-      copyToClipboard() {
-        bind.sessionHandleScreenshot(sessionId: sessionId, action: '1');
-        close();
-      }
-
-      cancel() {
-        bind.sessionHandleScreenshot(sessionId: sessionId, action: '2');
-        close();
-      }
-
-      final List<Widget> buttons = [
-        dialogButton('${translate('Save as')}...', onPressed: saveAs),
-        dialogButton('Copy to clipboard', onPressed: copyToClipboard),
-        dialogButton('Cancel', onPressed: cancel),
-      ];
-      dialogManager.dismissAll();
-      dialogManager.show(
-        (setState, close, context) => CustomAlertDialog(
-          title: null,
-          content: SelectionArea(
-              child: msgboxContent(msgBoxType, msgBoxTitle, msgBoxText)),
-          actions: buttons,
-        ),
-        tag: '$msgBoxType-$msgBoxTitle-$msgBoxTitle',
-      );
+          final ts = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+          final outputFile = '$screenshotDir${Platform.pathSeparator}screenshot_$ts.png';
+          debugPrint('[Screenshot] saving to: $outputFile');
+          final res = await bind.sessionHandleScreenshot(
+              sessionId: sessionId, action: '0:$outputFile');
+          if (res.isNotEmpty) {
+            debugPrint('[Screenshot] error: $res');
+            msgBox(sessionId, 'custom-nook-nocancel-hasclose-error',
+                'Take screenshot', res, '', dialogManager);
+          } else {
+            debugPrint('[Screenshot] success');
+            showFileSavedToast('스크린 샷이 저장되었습니다.', outputFile);
+          }
+        } catch (e, st) {
+          debugPrint('[Screenshot] exception: $e');
+          debugPrintStack(stackTrace: st);
+          msgBox(sessionId, 'custom-nook-nocancel-hasclose-error',
+              'Take screenshot', e.toString(), '', dialogManager);
+        }
+      });
     }
   }
 
@@ -694,8 +691,13 @@ class FfiModel with ChangeNotifier {
         title: Text(translate('Incoming Print Job')),
         content: content,
         actions: [
-          dialogButton('OK', onPressed: onSubmit),
-          dialogButton('Cancel', onPressed: onCancel),
+          Row(
+            children: [
+              Expanded(child: dialogButton('Cancel', onPressed: onCancel, isOutline: true)),
+              const SizedBox(width: 12),
+              Expanded(child: dialogButton('OK', onPressed: onSubmit)),
+            ],
+          ),
         ],
         onSubmit: onSubmit,
         onCancel: onCancel,
@@ -734,7 +736,7 @@ class FfiModel with ChangeNotifier {
       case kUrlActionClose:
         debugPrint("closing all instances");
         Future.microtask(() async {
-          await rustDeskWinManager.closeAllSubWindows();
+          await oneDeskWinManager.closeAllSubWindows();
           windowManager.close();
         });
         break;
@@ -868,7 +870,8 @@ class FfiModel with ChangeNotifier {
     } else if (type == 'input-2fa') {
       enter2FaDialog(sessionId, dialogManager);
     } else if (type == 'input-password') {
-      enterPasswordDialog(sessionId, dialogManager);
+      // 저장된 비밀번호가 있으면 자동 로그인 (파일 전송 등 기존 연결 시)
+      _autoLoginOrShowPasswordDialog(sessionId, peerId, dialogManager);
     } else if (type == 'session-login' || type == 'session-re-login') {
       enterUserLoginDialog(sessionId, dialogManager, 'login_linux_tip', true);
     } else if (type == 'session-login-password') {
@@ -903,6 +906,34 @@ class FfiModel with ChangeNotifier {
       final hasRetry = evt['hasRetry'] == 'true';
       showMsgBox(sessionId, type, title, text, link, hasRetry, dialogManager);
     }
+  }
+
+  /// 파일전송/터미널 등에서 활성 원격 연결이 있으면 자동 로그인
+  void _autoLoginOrShowPasswordDialog(
+      SessionID sessionId, String peerId, OverlayDialogManager dialogManager) async {
+    // 현재 연결 타입 확인 - 원격 데스크톱/카메라가 아닌 경우에만 자동 로그인
+    final currentConnType = parent.target?.connType;
+
+    // 원격 데스크톱(defaultConn) 또는 카메라(viewCamera) 연결은 자동 로그인 안함
+    if (currentConnType == ConnType.defaultConn || currentConnType == ConnType.viewCamera) {
+      enterPasswordDialog(sessionId, dialogManager);
+      return;
+    }
+
+    // 파일전송/터미널 등: 활성 원격 데스크톱 연결이 있으면 자동 로그인
+    final remoteCount = bind.peerGetSessionsCount(id: peerId, connType: 0);
+    final cameraCount = bind.peerGetSessionsCount(id: peerId, connType: 3);
+    final password = bind.mainGetPeerOptionSync(id: peerId, key: 'password');
+
+    debugPrint('[AutoLogin] connType: $currentConnType, peerId: $peerId, remoteCount: $remoteCount, cameraCount: $cameraCount, hasPassword: ${password.isNotEmpty}');
+
+    if (remoteCount > 0 || cameraCount > 0) {
+      // 활성 연결이 있으면 저장된 비밀번호로 자동 로그인
+      parent.target?.login('', '', sessionId, password, true);
+      return;
+    }
+    // 활성 연결이 없으면 대화상자 표시
+    enterPasswordDialog(sessionId, dialogManager);
   }
 
   handleToast(Map<String, dynamic> evt, SessionID sessionId, String peerId) {
@@ -942,7 +973,7 @@ class FfiModel with ChangeNotifier {
       {bool? hasCancel}) async {
     final showNoteEdit = parent.target != null &&
         allowAskForNoteAtEndOfConnection(parent.target, false) &&
-        (title == "Connection Error" || type == "restarting") &&
+        (title == "Connection decline" || type == "restarting") &&
         !hasRetry;
     if (showNoteEdit) {
       await showConnEndAuditDialogCloseCanceled(
@@ -1011,18 +1042,31 @@ class FfiModel with ChangeNotifier {
         title: null,
         content: msgboxContent(type, title, text2),
         actions: [
-          dialogButton('Close', onPressed: onClose, isOutline: true),
-          if (type == 'relay-hint')
-            dialogButton('Connect via relay',
-                onPressed: () => reconnect(dialogManager, sessionId, true),
-                buttonStyle: style,
-                isOutline: true),
-          dialogButton('Retry',
-              onPressed: () => reconnect(dialogManager, sessionId, false)),
-          if (type == 'relay-hint2')
-            dialogButton('Connect via relay',
-                onPressed: () => reconnect(dialogManager, sessionId, true),
-                buttonStyle: style),
+          Row(
+            children: [
+              Expanded(child: dialogButton('Close', onPressed: onClose, isOutline: true)),
+              const SizedBox(width: 8),
+              if (type == 'relay-hint')
+                Expanded(
+                  child: dialogButton('Connect via relay',
+                      onPressed: () => reconnect(dialogManager, sessionId, true),
+                      buttonStyle: style,
+                      isOutline: true),
+                ),
+              if (type == 'relay-hint') const SizedBox(width: 8),
+              Expanded(
+                child: dialogButton('Retry',
+                    onPressed: () => reconnect(dialogManager, sessionId, false)),
+              ),
+              if (type == 'relay-hint2') const SizedBox(width: 8),
+              if (type == 'relay-hint2')
+                Expanded(
+                  child: dialogButton('Connect via relay',
+                      onPressed: () => reconnect(dialogManager, sessionId, true),
+                      buttonStyle: style),
+                ),
+            ],
+          ),
         ],
         onCancel: onClose,
       );
@@ -1531,7 +1575,7 @@ class FfiModel with ChangeNotifier {
     }
 
     if (updateData.isEmpty) {
-      _pi.platformAdditions.remove(kPlatformAdditionsRustDeskVirtualDisplays);
+      _pi.platformAdditions.remove(kPlatformAdditionsOneDeskVirtualDisplays);
       _pi.platformAdditions.remove(kPlatformAdditionsAmyuniVirtualDisplays);
     } else {
       try {
@@ -1540,9 +1584,9 @@ class FfiModel with ChangeNotifier {
           _pi.platformAdditions[key] = updateJson[key];
         }
         if (!updateJson
-            .containsKey(kPlatformAdditionsRustDeskVirtualDisplays)) {
+            .containsKey(kPlatformAdditionsOneDeskVirtualDisplays)) {
           _pi.platformAdditions
-              .remove(kPlatformAdditionsRustDeskVirtualDisplays);
+              .remove(kPlatformAdditionsOneDeskVirtualDisplays);
         }
         if (!updateJson.containsKey(kPlatformAdditionsAmyuniVirtualDisplays)) {
           _pi.platformAdditions.remove(kPlatformAdditionsAmyuniVirtualDisplays);
@@ -2414,7 +2458,7 @@ class CanvasModel with ChangeNotifier {
       bumpAmount.y += bumpAmount.y.sign * 0.5;
 
       var bumpMouseSucceeded = _bumpMouseIsWorking &&
-          (await rustDeskWinManager.call(WindowType.Main, kWindowBumpMouse,
+          (await oneDeskWinManager.call(WindowType.Main, kWindowBumpMouse,
                   {"dx": bumpAmount.x.round(), "dy": bumpAmount.y.round()}))
               .result;
 
@@ -3882,8 +3926,8 @@ class PeerInfo with ChangeNotifier {
   bool get isInstalled =>
       platform != kPeerPlatformWindows ||
       platformAdditions[kPlatformAdditionsIsInstalled] == true;
-  List<int> get RustDeskVirtualDisplays => List<int>.from(
-      platformAdditions[kPlatformAdditionsRustDeskVirtualDisplays] ?? []);
+  List<int> get OneDeskVirtualDisplays => List<int>.from(
+      platformAdditions[kPlatformAdditionsOneDeskVirtualDisplays] ?? []);
   int get amyuniVirtualDisplayCount =>
       platformAdditions[kPlatformAdditionsAmyuniVirtualDisplays] ?? 0;
 
@@ -3893,8 +3937,8 @@ class PeerInfo with ChangeNotifier {
 
   bool get cursorEmbedded => tryGetDisplay()?.cursorEmbedded ?? false;
 
-  bool get isRustDeskIdd =>
-      platformAdditions[kPlatformAdditionsIddImpl] == 'rustdesk_idd';
+  bool get isOneDeskIdd =>
+      platformAdditions[kPlatformAdditionsIddImpl] == 'onedesk_idd';
   bool get isAmyuniIdd =>
       platformAdditions[kPlatformAdditionsIddImpl] == 'amyuni_idd';
 
