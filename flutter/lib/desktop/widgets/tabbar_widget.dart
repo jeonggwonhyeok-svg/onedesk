@@ -820,10 +820,11 @@ void setMovable(bool isMainWindow, bool movable) => setWindowMovable(isMainWindo
 /// 창 최대화 토글 (window_buttons.dart의 함수 재노출)
 Future<bool> toggleMaximize(bool isMainWindow) => toggleWindowMaximize(isMainWindow);
 
-Future<bool> closeConfirmDialog() async {
+Future<bool> closeConfirmDialog({OverlayDialogManager? dialogManager}) async {
+  final dm = dialogManager ?? gFFI.dialogManager;
   // 설정에서 현재 값 읽어오기
   var confirm = mainGetLocalBoolOptionSync(kOptionEnableConfirmClosingTabs);
-  final res = await gFFI.dialogManager.show<bool>((setState, close, context) {
+  final res = await dm.show<bool>((setState, close, context) {
     submit() async {
       await mainSetLocalBoolOption(kOptionEnableConfirmClosingTabs, confirm);
       close(true);

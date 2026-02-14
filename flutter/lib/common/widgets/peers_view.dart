@@ -298,9 +298,6 @@ class _PeersViewState extends State<_PeersView>
                           // n개 카드 = n * minCardWidth + (n-1) * space
                           // 수식 변환: n <= (availableWidth + space) / (minCardWidth + space)
                           int crossAxisCount = ((availableWidth + space) / (minCardWidth + space)).floor();
-                          File('C:/Project/onedesk/debug_layout.txt').writeAsStringSync(
-                            'maxWidth: ${constraints.maxWidth}\navailableWidth: $availableWidth\ncrossAxisCount: $crossAxisCount\nspace: $space\nminCardWidth: $minCardWidth\ncalc: ${(availableWidth + space) / (minCardWidth + space)}');
-
                           if (crossAxisCount < 1) crossAxisCount = 1;
                           // 카드 높이 결정 (grid: 220, tile: 80)
                           final cardHeight = peerCardUiType.value == PeerUiType.grid ? 220.0 : 80.0;

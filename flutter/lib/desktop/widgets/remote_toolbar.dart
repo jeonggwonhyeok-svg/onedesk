@@ -229,8 +229,6 @@ class RemoteToolbar extends StatefulWidget {
 }
 
 class _RemoteToolbarState extends State<RemoteToolbar> {
-  late Debouncer<int> _debouncerHide;
-  bool _isCursorOverImage = false;
   final _fractionX = 0.5.obs;
   final _dragging = false.obs;
 
@@ -262,7 +260,6 @@ class _RemoteToolbarState extends State<RemoteToolbar> {
   PeerInfo get pi => widget.ffi.ffiModel.pi;
   FfiModel get ffiModel => widget.ffi.ffiModel;
 
-  triggerAutoHide() => _debouncerHide.value = _debouncerHide.value + 1;
 
   void _minimize() async =>
       await WindowController.fromWindowId(windowId).minimize();
@@ -279,19 +276,7 @@ class _RemoteToolbarState extends State<RemoteToolbar> {
           0.5;
     });
 
-    _debouncerHide = Debouncer<int>(
-      Duration(milliseconds: 5000),
-      onChanged: _debouncerHideProc,
-      initialValue: 0,
-    );
-
     widget.onEnterOrLeaveImageSetter(identityHashCode(this), (enter) {
-      if (enter) {
-        triggerAutoHide();
-        _isCursorOverImage = true;
-      } else {
-        _isCursorOverImage = false;
-      }
     });
 
     // 녹화 모델 리스너
@@ -532,11 +517,6 @@ class _RemoteToolbarState extends State<RemoteToolbar> {
     );
   }
 
-  _debouncerHideProc(int v) {
-    if (!pin && show.isTrue && _isCursorOverImage && _dragging.isFalse) {
-      show.value = false;
-    }
-  }
 
   @override
   dispose() {
@@ -558,9 +538,6 @@ class _RemoteToolbarState extends State<RemoteToolbar> {
 
   Widget _buildDraggableShowHide(BuildContext context) {
     return Obx(() {
-      if (show.isTrue && _dragging.isFalse) {
-        triggerAutoHide();
-      }
       final borderRadius = BorderRadius.vertical(
         bottom: Radius.circular(8),
       );

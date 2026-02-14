@@ -372,12 +372,21 @@ class _ViewCameraTabPageState extends State<ViewCameraTabPage> {
           bind.mainGetLocalOption(key: kOptionEnableConfirmClosingTabs))) {
         res = true;
       } else {
-        res = await closeConfirmDialog();
+        res = await closeConfirmDialog(dialogManager: _getSessionDialogManager());
       }
       if (res) {
         tabController.clear();
       }
       return res;
+    }
+  }
+
+  OverlayDialogManager _getSessionDialogManager() {
+    try {
+      final tab = tabController.state.value.tabs.first;
+      return (tab.page as dynamic).ffi.dialogManager as OverlayDialogManager;
+    } catch (_) {
+      return gFFI.dialogManager;
     }
   }
 

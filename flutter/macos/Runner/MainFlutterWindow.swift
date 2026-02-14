@@ -10,7 +10,7 @@ import flutter_custom_cursor
 import package_info_plus
 import path_provider_foundation
 import screen_retriever
-import sqflite
+import sqflite_darwin
 // import tray_manager
 import uni_links_desktop
 import url_launcher_macos
@@ -57,6 +57,28 @@ class MainFlutterWindow: NSWindow {
     override public func order(_ place: NSWindow.OrderingMode, relativeTo otherWin: Int) {
         super.order(place, relativeTo: otherWin)
         hiddenWindowAtLaunch()
+    }
+
+    // Dynamic activation policy: show in Dock when window is visible, hide when not
+    override public func orderFront(_ sender: Any?) {
+        NSApp.setActivationPolicy(.regular)
+        super.orderFront(sender)
+        NSApp.activate(ignoringOtherApps: true)
+    }
+
+    override public func orderOut(_ sender: Any?) {
+        super.orderOut(sender)
+        // Hide from Dock if no visible windows remain
+        let hasVisibleWindows = NSApp.windows.contains { $0.isVisible && $0 != self }
+        if !hasVisibleWindows {
+            NSApp.setActivationPolicy(.accessory)
+        }
+    }
+
+    override public func makeKeyAndOrderFront(_ sender: Any?) {
+        NSApp.setActivationPolicy(.regular)
+        super.makeKeyAndOrderFront(sender)
+        NSApp.activate(ignoringOtherApps: true)
     }
 
     /// Override window theme.

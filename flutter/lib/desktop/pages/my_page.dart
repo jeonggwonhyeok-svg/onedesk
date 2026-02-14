@@ -7,8 +7,10 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 import 'package:get/get.dart';
+import 'dart:io' show Platform;
 import 'package:url_launcher/url_launcher_string.dart';
 import 'package:webview_windows/webview_windows.dart' as wv;
+import 'package:flutter_inappwebview/flutter_inappwebview.dart' as iaw;
 import 'package:flutter_hbb/common.dart';
 import 'package:flutter_hbb/common/api/auth_service.dart';
 import 'package:flutter_hbb/common/api/cookie_manager.dart';
@@ -1903,20 +1905,37 @@ class _MyPageState extends State<MyPage> {
                   }
                 }
 
-                // webview_windows 사용
-                return _WindowsWebView(
-                  url: hasUrl ? url : null,
-                  htmlContent: hasHtml ? htmlContent : null,
-                  onUrlChanged: (newUrl) {
-                    debugPrint('[PaymentWebView] URL changed: $newUrl');
-                    _checkPaymentResultUrl(newUrl);
-                  },
-                  onLoadingStateChanged: (isLoading) {
-                    _webViewProgress.value = isLoading ? 50 : 100;
-                  },
-                  cookies: cookies,
-                  cookieDomain: cookieDomain,
-                );
+                if (Platform.isWindows) {
+                  // Windows: webview_windows (WebView2) 사용
+                  return _WindowsWebView(
+                    url: hasUrl ? url : null,
+                    htmlContent: hasHtml ? htmlContent : null,
+                    onUrlChanged: (newUrl) {
+                      debugPrint('[PaymentWebView] URL changed: $newUrl');
+                      _checkPaymentResultUrl(newUrl);
+                    },
+                    onLoadingStateChanged: (isLoading) {
+                      _webViewProgress.value = isLoading ? 50 : 100;
+                    },
+                    cookies: cookies,
+                    cookieDomain: cookieDomain,
+                  );
+                } else {
+                  // macOS/Linux: flutter_inappwebview 사용
+                  return _InAppWebViewWidget(
+                    url: hasUrl ? url : null,
+                    htmlContent: hasHtml ? htmlContent : null,
+                    onUrlChanged: (newUrl) {
+                      debugPrint('[PaymentWebView] URL changed: $newUrl');
+                      _checkPaymentResultUrl(newUrl);
+                    },
+                    onLoadingStateChanged: (isLoading) {
+                      _webViewProgress.value = isLoading ? 50 : 100;
+                    },
+                    cookies: cookies,
+                    cookieDomain: cookieDomain,
+                  );
+                }
               }),
             ),
           ),
@@ -3213,6 +3232,138 @@ class _WindowsWebViewState extends State<_WindowsWebView> {
               backgroundColor: Colors.grey[200],
               valueColor:
                   const AlwaysStoppedAnimation<Color>(Color(0xFF8B5CF6)),
+            ),
+          ),
+      ],
+    );
+  }
+}
+
+/// macOS/Linux WebView 위젯 (flutter_inappwebview 패키지 사용)
+class _InAppWebViewWidget extends StatefulWidget {
+  final String? url;
+  final String? htmlContent;
+  final Function(String)? onUrlChanged;
+  final Function(bool)? onLoadingStateChanged;
+  final Map<String, String>? cookies;
+  final String? cookieDomain;
+
+  const _InAppWebViewWidget({
+    this.url,
+    this.htmlContent,
+    this.onUrlChanged,
+    this.onLoadingStateChanged,
+    this.cookies,
+    this.cookieDomain,
+  });
+
+  @override
+  State<_InAppWebViewWidget> createState() => _InAppWebViewWidgetState();
+}
+
+class _InAppWebViewWidgetState extends State<_InAppWebViewWidget> {
+  iaw.InAppWebViewController? _controller;
+  bool _isLoading = true;
+
+  @override
+  void didUpdateWidget(covariant _InAppWebViewWidget oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (_controller != null) {
+      if (oldWidget.htmlContent != widget.htmlContent &&
+          widget.htmlContent != null &&
+          widget.htmlContent!.isNotEmpty) {
+        _controller!.loadData(
+          data: widget.htmlContent!,
+          mimeType: 'text/html',
+          encoding: 'utf-8',
+        );
+      } else if (oldWidget.url != widget.url &&
+          widget.url != null &&
+          widget.url!.isNotEmpty) {
+        _controller!.loadUrl(
+            urlRequest: iaw.URLRequest(url: iaw.WebUri(widget.url!)));
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Stack(
+      children: [
+        iaw.InAppWebView(
+          initialUrlRequest:
+              widget.htmlContent == null && widget.url != null
+                  ? iaw.URLRequest(url: iaw.WebUri(widget.url!))
+                  : null,
+          initialData: widget.htmlContent != null
+              ? iaw.InAppWebViewInitialData(
+                  data: widget.htmlContent!,
+                  mimeType: 'text/html',
+                  encoding: 'utf-8',
+                )
+              : null,
+          initialSettings: iaw.InAppWebViewSettings(
+            useShouldOverrideUrlLoading: true,
+            javaScriptEnabled: true,
+            domStorageEnabled: true,
+            supportMultipleWindows: true,
+            javaScriptCanOpenWindowsAutomatically: true,
+          ),
+          onWebViewCreated: (controller) async {
+            _controller = controller;
+            // 쿠키 설정
+            if (widget.cookies != null &&
+                widget.cookies!.isNotEmpty &&
+                widget.url != null) {
+              final cookieMgr = iaw.CookieManager.instance();
+              for (final entry in widget.cookies!.entries) {
+                await cookieMgr.setCookie(
+                  url: iaw.WebUri(widget.url!),
+                  name: entry.key,
+                  value: entry.value,
+                );
+              }
+              controller.loadUrl(
+                  urlRequest: iaw.URLRequest(url: iaw.WebUri(widget.url!)));
+            }
+          },
+          onLoadStart: (controller, url) {
+            if (mounted) setState(() => _isLoading = true);
+            widget.onLoadingStateChanged?.call(true);
+          },
+          onLoadStop: (controller, url) {
+            if (mounted) setState(() => _isLoading = false);
+            widget.onLoadingStateChanged?.call(false);
+          },
+          onUpdateVisitedHistory: (controller, url, androidIsReload) {
+            if (url != null) {
+              widget.onUrlChanged?.call(url.toString());
+            }
+          },
+          shouldOverrideUrlLoading:
+              (controller, navigationAction) async {
+            return iaw.NavigationActionPolicy.ALLOW;
+          },
+          onCreateWindow:
+              (controller, createWindowAction) async {
+            final url =
+                createWindowAction.request.url?.toString();
+            if (url != null && url.isNotEmpty) {
+              _controller?.loadUrl(
+                  urlRequest: iaw.URLRequest(url: iaw.WebUri(url)));
+            }
+            return false;
+          },
+        ),
+        if (_isLoading)
+          Positioned(
+            top: 0,
+            left: 0,
+            right: 0,
+            child: LinearProgressIndicator(
+              backgroundColor: Colors.grey[200],
+              valueColor: const AlwaysStoppedAnimation<Color>(
+                  Color(0xFF8B5CF6)),
             ),
           ),
       ],

@@ -648,11 +648,41 @@ class _AppState extends State<App> with WidgetsBindingObserver {
 }
 
 Widget _keepScaleBuilder(BuildContext context, Widget? child) {
+  final data = MediaQuery.of(context);
+  child = child ?? Container();
+
+  // Override text scaling to ignore system text size settings
+  var newData = data.copyWith(
+    textScaler: TextScaler.linear(1.0),
+  );
+
+  // On Windows/Linux, compensate for system DPI scaling (125%, 150% etc.)
+  // macOS Retina displays always report devicePixelRatio=2.0 regardless of
+  // display scaling settings, so DPI compensation is not applicable on macOS.
+  if ((Platform.isWindows || Platform.isLinux) && data.devicePixelRatio > 1.0) {
+    final dpr = data.devicePixelRatio;
+    newData = newData.copyWith(
+      devicePixelRatio: 1.0,
+      size: Size(data.size.width * dpr, data.size.height * dpr),
+    );
+    return MediaQuery(
+      data: newData,
+      child: Transform.scale(
+        scale: 1.0 / dpr,
+        alignment: Alignment.topLeft,
+        child: OverflowBox(
+          alignment: Alignment.topLeft,
+          maxWidth: data.size.width * dpr,
+          maxHeight: data.size.height * dpr,
+          child: child,
+        ),
+      ),
+    );
+  }
+
   return MediaQuery(
-    data: MediaQuery.of(context).copyWith(
-      textScaler: TextScaler.linear(1.0),
-    ),
-    child: child ?? Container(),
+    data: newData,
+    child: child,
   );
 }
 

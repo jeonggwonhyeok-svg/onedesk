@@ -346,7 +346,20 @@ impl RecorderApi for WebmRecorder {
 
 impl Drop for WebmRecorder {
     fn drop(&mut self) {
-        let _ = std::mem::replace(&mut self.webm, None).map_or(false, |webm| webm.finalize(None));
+        // Use try_finalize to get the Writer back, then explicitly sync to disk.
+        // On macOS, dropping File without sync_all may not flush data to disk.
+        std::mem::replace(&mut self.webm, None).map(|webm| {
+            match webm.try_finalize(None) {
+                Ok(writer) => {
+                    let file = writer.unwrap();
+                    file.sync_all().ok();
+                }
+                Err(writer) => {
+                    let file = writer.unwrap();
+                    file.sync_all().ok();
+                }
+            }
+        });
         let mut state = RecordState::WriteTail;
         if !self.written || self.start.elapsed().as_secs() < MIN_SECS {
             std::fs::remove_file(&self.ctx2.filename).ok();

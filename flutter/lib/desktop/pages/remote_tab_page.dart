@@ -402,7 +402,7 @@ class _ConnectionTabPageState extends State<ConnectionTabPage> {
           bind.mainGetLocalOption(key: kOptionEnableConfirmClosingTabs))) {
         res = true;
       } else {
-        res = await closeConfirmDialog();
+        res = await closeConfirmDialog(dialogManager: _getSessionDialogManager());
       }
       if (res) {
         tabController.clear();
@@ -411,10 +411,21 @@ class _ConnectionTabPageState extends State<ConnectionTabPage> {
     }
   }
 
+  OverlayDialogManager _getSessionDialogManager() {
+    try {
+      final tab = tabController.state.value.tabs.first;
+      final ffi = (tab.page as RemotePage).ffi;
+      return ffi.dialogManager;
+    } catch (_) {
+      return gFFI.dialogManager;
+    }
+  }
+
   /// 원격 종료 확인 다이얼로그
   Future<bool> _showRemoteCloseConfirmDialog() async {
+    final dialogManager = _getSessionDialogManager();
     final completer = Completer<bool>();
-    gFFI.dialogManager.show((setState, close, context) {
+    dialogManager.show((setState, close, context) {
       return CustomAlertDialog(
         title: Text(
           translate('Shutdown Remote'),

@@ -2370,7 +2370,6 @@ impl<T: InvokeUiSession> Remote<T> {
             return;
         }
         self.last_record_state = start;
-        log::info!("record screen start: {start}");
         // update local
         for (_, v) in self.video_threads.iter_mut() {
             v.video_sender.send(MediaData::RecordScreen(start)).ok();
