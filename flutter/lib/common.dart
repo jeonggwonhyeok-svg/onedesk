@@ -2818,11 +2818,11 @@ Future<Size> _adjustRestoreMainWindowSize(double? width, double? height,
   final isFileTransfer = type == WindowType.FileTransfer;
   final defaultWidth = isFileTransfer
       ? kFileTransferMinWidth
-      : ((isDesktop || isWebDesktop) ? 1280 : kMobileDefaultDisplayWidth)
+      : ((isDesktop || isWebDesktop) ? 800 : kMobileDefaultDisplayWidth)
           .toDouble();
   final defaultHeight = isFileTransfer
       ? kFileTransferMinHeight
-      : ((isDesktop || isWebDesktop) ? 720 : kMobileDefaultDisplayHeight)
+      : ((isDesktop || isWebDesktop) ? 600 : kMobileDefaultDisplayHeight)
           .toDouble();
   double restoreWidth = width ?? defaultWidth;
   double restoreHeight = height ?? defaultHeight;
@@ -2844,6 +2844,23 @@ Future<Size> _adjustRestoreMainWindowSize(double? width, double? height,
   if (restoreHeight > maxHeight) {
     restoreHeight = defaultHeight;
   }
+
+  // Cap window size to 90% of the primary screen's logical dimensions.
+  // This prevents the window from being larger than the screen at any DPI scale.
+  if (isDesktop || isWebDesktop) {
+    final screenList = await window_size.getScreenList();
+    if (screenList.isNotEmpty) {
+      final screenW = screenList.first.visibleFrame.width;
+      final screenH = screenList.first.visibleFrame.height;
+      if (screenW > 0 && restoreWidth > screenW * 0.9) {
+        restoreWidth = screenW * 0.9;
+      }
+      if (screenH > 0 && restoreHeight > screenH * 0.9) {
+        restoreHeight = screenH * 0.9;
+      }
+    }
+  }
+
   return Size(restoreWidth, restoreHeight);
 }
 
@@ -2951,6 +2968,16 @@ Future<bool> restoreWindowPosition(WindowType type,
       case WindowType.Main:
         // Center the main window only if no position is saved (on first run).
         if (isWindows || isLinux) {
+          // Set initial window size based on screen logical dimensions so it
+          // fits properly at any DPI scale (100%, 125%, 150%, 175%, 200%, etc.)
+          final screenList = await window_size.getScreenList();
+          if (screenList.isNotEmpty) {
+            final screenW = screenList.first.visibleFrame.width;
+            final screenH = screenList.first.visibleFrame.height;
+            final initW = min(800.0, screenW * 0.75);
+            final initH = min(600.0, screenH * 0.75);
+            await windowManager.setSize(Size(initW, initH));
+          }
           await windowManager.center();
         }
         // For MacOS, the window is already centered by default.
