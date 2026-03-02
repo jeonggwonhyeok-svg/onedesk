@@ -3106,13 +3106,17 @@ pub fn kill_tray_process() {
         .unwrap_or_default()
         .to_string_lossy()
         .to_string();
-    let pids = get_pids_with_first_arg_by_wmic(&filename, "--tray");
-    let s = hbb_common::sysinfo::System::new_all();
-    for pid in pids {
-        if let Some(process) = s.process(pid) {
-            log::info!("Killing tray process pid={:?}", pid);
-            process.kill();
+    match get_pids_with_first_arg_check_session(&filename, "--tray", true) {
+        Ok(pids) => {
+            let s = hbb_common::sysinfo::System::new_all();
+            for pid in pids {
+                if let Some(process) = s.process(pid) {
+                    log::info!("Killing tray process pid={:?}", pid);
+                    process.kill();
+                }
+            }
         }
+        Err(e) => log::warn!("Failed to find tray process: {}", e),
     }
 }
 
