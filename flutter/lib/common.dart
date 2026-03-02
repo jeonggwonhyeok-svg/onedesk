@@ -2845,27 +2845,6 @@ Future<Size> _adjustRestoreMainWindowSize(double? width, double? height,
     restoreHeight = defaultHeight;
   }
 
-  // Cap window size based on screen logical dimensions so it fits at any DPI scale.
-  // min(fixed_max, max(fixed_min, screen * ratio))
-  //   100% DPI (1920×1040) → 800×600 (no change)
-  //   150% DPI (1280×680)  → ~768×510
-  //   200% DPI  (960×520)  → 700×500
-  if (isDesktop || isWebDesktop) {
-    final screenList = await window_size.getScreenList();
-    if (screenList.isNotEmpty) {
-      final screenW = screenList.first.visibleFrame.width;
-      final screenH = screenList.first.visibleFrame.height;
-      if (screenW > 0) {
-        final maxW = min(800.0, max(700.0, screenW * 0.60));
-        if (restoreWidth > maxW) restoreWidth = maxW;
-      }
-      if (screenH > 0) {
-        final maxH = min(600.0, max(500.0, screenH * 0.75));
-        if (restoreHeight > maxH) restoreHeight = maxH;
-      }
-    }
-  }
-
   return Size(restoreWidth, restoreHeight);
 }
 
@@ -2973,16 +2952,10 @@ Future<bool> restoreWindowPosition(WindowType type,
       case WindowType.Main:
         // Center the main window only if no position is saved (on first run).
         if (isWindows || isLinux) {
-          // Set initial window size based on screen logical dimensions so it
-          // fits properly at any DPI scale (100%, 125%, 150%, 175%, 200%, etc.)
-          final screenList = await window_size.getScreenList();
-          if (screenList.isNotEmpty) {
-            final screenW = screenList.first.visibleFrame.width;
-            final screenH = screenList.first.visibleFrame.height;
-            final initW = min(800.0, max(700.0, screenW * 0.60));
-            final initH = min(600.0, max(500.0, screenH * 0.75));
-            await windowManager.setSize(Size(initW, initH));
-          }
+          // ignoreDevicePixelRatio: true → 800×600 물리 픽셀로 설정
+          // 어떤 DPI(100%/150%/200%)에서도 동일한 화면 크기로 표시됨
+          await windowManager.setSize(const Size(800, 600),
+              ignoreDevicePixelRatio: _ignoreDevicePixelRatio);
           await windowManager.center();
         }
         // For MacOS, the window is already centered by default.

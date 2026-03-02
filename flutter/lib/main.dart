@@ -172,35 +172,14 @@ void runMainApp(bool startService) async {
         bind.mainGetBuildinOption(key: "main-window-always-on-top") == 'Y';
   }
 
-  // Convert physical target size to logical pixels using the screen's scale factor.
-  // This ensures the window occupies the same physical pixels at any DPI (100%/150%/200%).
-  // Physical target: 880×660 px  →  100%: 880×660 logical, 150%: 587×440 logical, 200%: 440×330 logical
-  const double kTargetPhysicalW = 880.0;
-  const double kTargetPhysicalH = 660.0;
-  double _initW = kTargetPhysicalW;
-  double _initH = kTargetPhysicalH;
-  double _minW = kMainWindowMinWidth, _minH = kMainWindowMinHeight;
-  if (isWindows || isLinux) {
-    final screens = await window_size.getScreenList();
-    if (screens.isNotEmpty) {
-      final scale = screens.first.scaleFactor > 0 ? screens.first.scaleFactor : 1.0;
-      _initW = (kTargetPhysicalW / scale).clamp(500.0, kTargetPhysicalW);
-      _initH = (kTargetPhysicalH / scale).clamp(400.0, kTargetPhysicalH);
-      _minW = min(kMainWindowMinWidth, _initW * 0.80);
-      _minH = min(kMainWindowMinHeight, _initH * 0.80);
-    }
-  }
-
   // Set window option.
   WindowOptions windowOptions = getHiddenTitleBarWindowOptions(
       isMainWindow: true,
-      minimumSize: Size(_minW, _minH),
       alwaysOnTop: alwaysOnTop);
   windowManager.waitUntilReadyToShow(windowOptions, () async {
-    await windowManager.setMinimumSize(Size(_minW, _minH));
-    // Restore saved position (x, y), then enforce our DPI-normalized size.
+    // restoreWindowPosition uses ignoreDevicePixelRatio: true internally,
+    // so all sizes are in physical pixels — same visual size at any DPI.
     await restoreWindowPosition(WindowType.Main);
-    await windowManager.setSize(Size(_initW, _initH));
     // Check the startup argument, if we successfully handle the argument, we keep the main window hidden.
     final handledByUniLinks = await initUniLinks();
     debugPrint("handled by uni links: $handledByUniLinks");
