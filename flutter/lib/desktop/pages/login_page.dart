@@ -220,13 +220,16 @@ class _LoginPageState extends State<LoginPage> {
       // UserInfo 생성
       final userInfo = UserInfo.fromJson(meRes.data!);
 
-      // 디바이스 ID 및 버전 가져오기
-      final deviceId = await bind.mainGetMyId();
+      // 버전 가져오기
       final version = await bind.mainGetVersion();
 
       // 세션 등록
       final registerRes =
-          await sessionService.registerSession(deviceId, version);
+          await sessionService.registerSession(
+            version,
+            deviceId: platformFFI.deviceId,
+            deviceName: platformFFI.deviceName,
+          );
       if (!registerRes.success) {
         _hideLoginLoadingDialog();
         setState(() {
@@ -1136,13 +1139,16 @@ class _MobileIdLoginPageState extends State<_MobileIdLoginPage> {
       // UserInfo 생성
       final userInfo = UserInfo.fromJson(meRes.data!);
 
-      // 디바이스 ID 및 버전 가져오기
-      final deviceId = await bind.mainGetMyId();
+      // 버전 가져오기
       final version = await bind.mainGetVersion();
 
       // 세션 등록
       final registerRes =
-          await sessionService.registerSession(deviceId, version);
+          await sessionService.registerSession(
+            version,
+            deviceId: platformFFI.deviceId,
+            deviceName: platformFFI.deviceName,
+          );
       if (!registerRes.success) {
         _hideLoginLoadingDialog();
         setState(() {

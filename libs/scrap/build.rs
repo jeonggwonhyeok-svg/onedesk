@@ -158,6 +158,25 @@ fn generate_bindings(
         b = b.clang_arg(format!("-I{}", dir.display()));
     }
 
+    // Android cross-compile on macOS: add NDK sysroot for bindgen
+    if let Ok(ndk) = env::var("ANDROID_NDK_HOME") {
+        let target_os = env::var("CARGO_CFG_TARGET_OS").unwrap_or_default();
+        if target_os == "android" {
+            let host = if cfg!(target_os = "macos") { "darwin-x86_64" } else { "linux-x86_64" };
+            let sysroot = format!("{}/toolchains/llvm/prebuilt/{}/sysroot", ndk, host);
+            b = b.clang_arg(format!("--sysroot={}", sysroot));
+            b = b.clang_arg(format!("-isystem{}/usr/include", sysroot));
+            let target_arch = env::var("CARGO_CFG_TARGET_ARCH").unwrap_or_default();
+            let triple = match target_arch.as_str() {
+                "aarch64" => "aarch64-linux-android",
+                "arm" => "arm-linux-androideabi",
+                "x86_64" => "x86_64-linux-android",
+                _ => "aarch64-linux-android",
+            };
+            b = b.clang_arg(format!("-isystem{}/usr/include/{}", sysroot, triple));
+        }
+    }
+
     b.generate().unwrap().write_to_file(ffi_rs).unwrap();
     fs::copy(ffi_rs, exact_file).ok(); // ignore failure
 }

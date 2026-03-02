@@ -416,12 +416,15 @@ Future<bool?> loginDialog() async {
         // UserInfo 생성
         final userInfo = UserInfo.fromJson(meRes.data!);
 
-        // 디바이스 ID 및 버전 가져오기
-        final deviceId = await bind.mainGetMyId();
+        // 버전 가져오기
         final version = await bind.mainGetVersion();
 
         // 세션 등록
-        final registerRes = await sessionService.registerSession(deviceId, version);
+        final registerRes = await sessionService.registerSession(
+          version,
+          deviceId: platformFFI.deviceId,
+          deviceName: platformFFI.deviceName,
+        );
         if (!registerRes.success) {
           setState(() {
             passwordMsg = translate('Bad Request');
@@ -652,6 +655,14 @@ void withdrawConfirmDialog() {
   gFFI.dialogManager.show((setState, close, context) {
 
     void submit() async {
+      // loginType == 0 (일반 로그인)이면 비밀번호 입력 다이얼로그로 이동
+      if (gFFI.userModel.loginType.value == 0) {
+        close();
+        _withdrawPasswordDialog();
+        return;
+      }
+
+      // 소셜 로그인은 바로 탈퇴 진행
       setState(() {
         isLoading = true;
       });
@@ -660,12 +671,10 @@ void withdrawConfirmDialog() {
       if (isDesktop) {
         await oneDeskWinManager.closeAllSubWindows();
       } else {
-        // 모바일에서 활성 세션이 있으면 종료
         if (gFFI.id.isNotEmpty) {
           await gFFI.close();
         }
       }
-      // CM 창의 모든 연결 종료 (CM 창은 연결이 끊기면 자동으로 닫힘)
       await gFFI.serverModel.closeAll();
 
       try {
@@ -674,7 +683,6 @@ void withdrawConfirmDialog() {
 
         if (response.success) {
           close();
-          // 탈퇴 성공 다이얼로그 표시
           _withdrawSuccessDialog();
         } else {
           setState(() {
@@ -792,6 +800,156 @@ void withdrawConfirmDialog() {
       ],
       onSubmit: (isLoading || !isChecked) ? null : submit,
       onCancel: isLoading ? null : close,
+    );
+  }, forceGlobal: true);
+}
+
+/// 회원탈퇴 - 비밀번호 입력 다이얼로그 (일반 로그인 전용)
+void _withdrawPasswordDialog() {
+  bool isLoading = false;
+  final passwordController = TextEditingController();
+  bool obscurePassword = true;
+  String? passwordError;
+
+  gFFI.dialogManager.show((setState, close, context) {
+    void submit() async {
+      final password = passwordController.text.trim();
+      if (password.isEmpty) {
+        setState(() {
+          passwordError = translate('Enter password');
+        });
+        return;
+      }
+
+      setState(() {
+        isLoading = true;
+        passwordError = null;
+      });
+
+      // 모든 원격 세션 종료
+      if (isDesktop) {
+        await oneDeskWinManager.closeAllSubWindows();
+      } else {
+        if (gFFI.id.isNotEmpty) {
+          await gFFI.close();
+        }
+      }
+      await gFFI.serverModel.closeAll();
+
+      try {
+        final authService = getAuthService();
+        final response = await authService.signOut(password);
+
+        if (response.success) {
+          passwordController.dispose();
+          close();
+          _withdrawSuccessDialog();
+        } else {
+          setState(() {
+            isLoading = false;
+            passwordError = translate('Wrong Password');
+          });
+        }
+      } catch (e) {
+        setState(() {
+          isLoading = false;
+          passwordError = translate('Bad Request');
+        });
+      }
+    }
+
+    return CustomAlertDialog(
+      title: Text(
+        translate('Delete Account'),
+        style: MyTheme.dialogTitleStyle,
+      ),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            translate('Password'),
+            style: const TextStyle(
+              fontSize: 14,
+              fontWeight: FontWeight.w500,
+              color: Color(0xFF454447),
+            ),
+          ),
+          const SizedBox(height: 8),
+          TextField(
+            controller: passwordController,
+            obscureText: obscurePassword,
+            autofocus: true,
+            decoration: InputDecoration(
+              hintText: translate('Enter password'),
+              hintStyle: const TextStyle(color: Color(0xFFB0B0B0)),
+              errorText: passwordError,
+              contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(8),
+                borderSide: const BorderSide(color: Color(0xFFDEDEE2)),
+              ),
+              enabledBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(8),
+                borderSide: const BorderSide(color: Color(0xFFDEDEE2)),
+              ),
+              focusedBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(8),
+                borderSide: BorderSide(color: MyTheme.accent),
+              ),
+              suffixIcon: IconButton(
+                icon: Icon(
+                  obscurePassword ? Icons.visibility_off_outlined : Icons.visibility_outlined,
+                  color: const Color(0xFF999999),
+                  size: 20,
+                ),
+                onPressed: () {
+                  setState(() {
+                    obscurePassword = !obscurePassword;
+                  });
+                },
+              ),
+            ),
+            onSubmitted: isLoading ? null : (_) => submit(),
+          ),
+          if (isLoading) ...[
+            const SizedBox(height: 16),
+            const LinearProgressIndicator(),
+          ],
+        ],
+      ),
+      actions: [
+        SizedBox(
+          width: double.infinity,
+          child: Row(
+            children: [
+              Expanded(
+                child: StyledOutlinedButton(
+                  label: translate("Cancel"),
+                  onPressed: isLoading ? null : () {
+                    passwordController.dispose();
+                    close();
+                  },
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: StyledPrimaryButton(
+                  label: translate("OK"),
+                  onPressed: isLoading ? null : submit,
+                  backgroundColor: const Color(0xFFFE3E3E),
+                  hoverBorderColor: const Color(0xFFFE3E3E),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ],
+      onSubmit: isLoading ? null : submit,
+      onCancel: isLoading ? null : () {
+        passwordController.dispose();
+        close();
+      },
     );
   }, forceGlobal: true);
 }

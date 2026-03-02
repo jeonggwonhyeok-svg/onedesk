@@ -80,7 +80,7 @@ pub static ref T: std::collections::HashMap<&'static str, &'static str> =
         ("Please enter your password", "비밀번호를 입력하세요"),
         ("Please enter verification code", "인증번호를 입력해 주세요."),
         ("Remember password", "비밀번호 기억"),
-        ("Wrong Password", "잘못된 비밀번호"),
+        ("Wrong Password", "잘못된 비밀번호 입니다."),
         ("Do you want to enter again?", "다시 입력하시겠습니까?"),
         ("Connection decline", "액세스 거절"),
         ("Error", "오류"),

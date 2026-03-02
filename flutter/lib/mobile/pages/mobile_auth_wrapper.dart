@@ -5,10 +5,12 @@ library;
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:get/get.dart';
 
 import '../../common.dart';
 import '../../models/platform_model.dart';
+import '../../models/state_model.dart';
 import '../../common/api/session_service.dart';
 import '../../common/widgets/styled_form_widgets.dart';
 import '../../desktop/pages/login_page.dart';
@@ -194,6 +196,17 @@ class _MobileAuthWrapperState extends State<MobileAuthWrapper> {
   /// 세션 KILLED 처리 - 다른 기기에서 로그인됨
   Future<void> _handleSessionKilled() async {
     _sessionCheckTimer?.cancel();
+
+    // 원격 연결 페이지에서 홈으로 돌아가기
+    if (!stateGlobal.isInMainPage) {
+      await SystemChrome.setEnabledSystemUIMode(SystemUiMode.manual,
+          overlays: SystemUiOverlay.values);
+      gFFI.chatModel.hideChatOverlay();
+      if (globalKey.currentContext != null) {
+        Navigator.popUntil(globalKey.currentContext!, ModalRoute.withName("/"));
+      }
+      stateGlobal.isInMainPage = true;
+    }
 
     // 활성 세션 종료
     if (gFFI.id.isNotEmpty) {

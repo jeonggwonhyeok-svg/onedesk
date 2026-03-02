@@ -26,10 +26,11 @@ class SessionService {
   }
 
   /// 세션 등록 (디바이스 등록)
-  Future<ApiResponse> registerSession(String deviceId, String version) async {
+  Future<ApiResponse> registerSession(String version, {required String deviceId, String? deviceName}) async {
     return await _api.postJson('api/devices/register', data: {
       'localBox': deviceId,
-      'deviceName': deviceId,
+      'deviceName': deviceName ?? deviceId,
+      'deviceId': deviceId,
       'deviceVersion': version,
     });
   }

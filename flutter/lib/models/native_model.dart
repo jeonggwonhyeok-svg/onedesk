@@ -7,6 +7,7 @@ import 'package:external_path/external_path.dart';
 import 'package:ffi/ffi.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_hbb/consts.dart';
 import 'package:flutter_hbb/main.dart';
 import 'package:package_info_plus/package_info_plus.dart';
@@ -34,6 +35,11 @@ class PlatformFFI {
   final _eventHandlers = <String, Map<String, HandleEvent>>{};
   late OnedeskImpl _ffiBind;
   late String _appType;
+
+  /// 플랫폼별 고유 기기 ID (재설치 후에도 유지)
+  String deviceId = '';
+  /// 플랫폼별 기기 이름
+  String deviceName = '';
   StreamEventHandler? _eventCallback;
 
   PlatformFFI._();
@@ -175,12 +181,34 @@ class PlatformFFI {
       if (isAndroid) {
         AndroidDeviceInfo androidInfo = await deviceInfo.androidInfo;
         name = '${androidInfo.brand}-${androidInfo.model}';
-        id = androidInfo.id.hashCode.toString();
         androidVersion = androidInfo.version.sdkInt;
+        // ANDROID_ID: 공장초기화 전까지 유지, 앱 재설치해도 동일 (UUID 원본 사용)
+        try {
+          final androidId = await const MethodChannel('mChannel').invokeMethod<String>('get_android_id');
+          id = (androidId != null && androidId.isNotEmpty) ? androidId : androidInfo.id;
+        } catch (e) {
+          debugPrint('Failed to get ANDROID_ID: $e');
+          id = androidInfo.id;
+        }
       } else if (isIOS) {
         IosDeviceInfo iosInfo = await deviceInfo.iosInfo;
         name = iosInfo.utsname.machine;
-        id = iosInfo.identifierForVendor.hashCode.toString();
+        // Keychain에 identifierForVendor를 저장하여 앱 삭제 후 재설치해도 유지 (UUID 원본 사용)
+        const storage = FlutterSecureStorage(
+          iOptions: IOSOptions(accessibility: KeychainAccessibility.first_unlock_this_device),
+        );
+        const key = 'onedesk_device_id';
+        String? storedId = await storage.read(key: key);
+        // 기존 hashCode 값이 저장되어 있으면 UUID 원본으로 갱신
+        final vendorId = iosInfo.identifierForVendor ?? '';
+        if (storedId != null && storedId.isNotEmpty && storedId.contains('-')) {
+          id = storedId;
+        } else {
+          id = vendorId;
+          if (vendorId.isNotEmpty) {
+            await storage.write(key: key, value: id);
+          }
+        }
       } else if (isLinux) {
         LinuxDeviceInfo linuxInfo = await deviceInfo.linuxInfo;
         name = linuxInfo.name;
@@ -212,6 +240,8 @@ class PlatformFFI {
       if (desktopType == DesktopType.cm) {
         await _ffiBind.cmInit();
       }
+      deviceId = id;
+      deviceName = name;
       await _ffiBind.mainDeviceId(id: id);
       await _ffiBind.mainDeviceName(name: name);
       await _ffiBind.mainSetHomeDir(home: _homeDir);

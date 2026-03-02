@@ -226,11 +226,14 @@ class NaverAuthService {
         // 6. 세션 등록 및 활성화
         if (isSessionServiceInitialized()) {
           final sessionService = getSessionService();
-          final deviceId = await bind.mainGetMyId();
           final version = await bind.mainGetVersion();
 
           final registerRes =
-              await sessionService.registerSession(deviceId, version);
+              await sessionService.registerSession(
+                version,
+                deviceId: platformFFI.deviceId,
+                deviceName: platformFFI.deviceName,
+              );
           if (registerRes.success) {
             final deviceKey = registerRes.extract('deviceKey') ?? '';
             userInfo.deviceKey = deviceKey;

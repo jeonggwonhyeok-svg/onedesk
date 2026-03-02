@@ -284,10 +284,13 @@ class UserModel {
       // 세션 등록 및 활성화
       if (isSessionServiceInitialized()) {
         final sessionService = getSessionService();
-        final deviceId = await bind.mainGetMyId();
         final version = await bind.mainGetVersion();
 
-        final registerRes = await sessionService.registerSession(deviceId, version);
+        final registerRes = await sessionService.registerSession(
+          version,
+          deviceId: platformFFI.deviceId,
+          deviceName: platformFFI.deviceName,
+        );
         if (registerRes.success) {
           userInfo.deviceKey = registerRes.extract('deviceKey');
 

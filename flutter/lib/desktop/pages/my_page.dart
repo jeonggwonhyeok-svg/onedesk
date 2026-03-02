@@ -612,16 +612,18 @@ class _MyPageState extends State<MyPage> {
           // 현재 이용 중인 플랜 (토글 가능)
           _buildPlanSection(),
           const SizedBox(height: 20),
-          // 비밀번호 변경
-          _buildMenuItem(
-            icon: 'assets/icons/profile-change-password.svg',
-            title: translate('Change Password'),
-            onTap: () {
-              _resetPasswordForm();
-              _currentView.value = MyPageView.changePassword;
-            },
-          ),
-          const SizedBox(height: 20),
+          // 비밀번호 변경 (소셜 로그인이 아닌 경우만 표시)
+          if (gFFI.userModel.loginType.value == 0) ...[
+            _buildMenuItem(
+              icon: 'assets/icons/profile-change-password.svg',
+              title: translate('Change Password'),
+              onTap: () {
+                _resetPasswordForm();
+                _currentView.value = MyPageView.changePassword;
+              },
+            ),
+            const SizedBox(height: 20),
+          ],
           // 이용약관, 개인정보취급정책, 결제 및 환불정책 (하나의 카드)
           _buildPolicyCard(),
           const SizedBox(height: 32),

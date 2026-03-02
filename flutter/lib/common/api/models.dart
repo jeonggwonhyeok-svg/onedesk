@@ -179,7 +179,7 @@ class UserInfo {
       email: json['email'] ?? '',
       nick: json['userName'],
       type: type,
-      loginType: json['loginType'] == 'google' ? 1 : 0,
+      loginType: _parseLoginType(json['loginType']),
       lastPay: parseDate(json['paidAt']) ?? parseDate(json['createdAt']),
       deviceKey: json['deviceKey'],
       sessionKey: json['sessionKey'],
@@ -199,7 +199,7 @@ class UserInfo {
       'email': email,
       'nick': nick,
       'planType': planTypeValue,
-      'loginType': loginType == 1 ? 'google' : 'email',
+      'loginType': _loginTypeToString(loginType),
       'lastPay': lastPay,
       'deviceKey': deviceKey,
       'sessionKey': sessionKey,
@@ -223,7 +223,30 @@ class UserInfo {
   }
 
   /// 로그인 타입 문자열
-  String get loginTypeString => loginType == 1 ? 'Google' : 'Email';
+  String get loginTypeString => _loginTypeToString(loginType);
+
+  /// 일반(이메일) 로그인인지 여부
+  bool get isNormalLogin => loginType == 0;
+
+  static int _parseLoginType(dynamic value) {
+    if (value == null) return 0;
+    final str = value.toString().toLowerCase();
+    switch (str) {
+      case 'google': return 1;
+      case 'kakao': return 2;
+      case 'naver': return 3;
+      default: return 0; // normal, email 등
+    }
+  }
+
+  static String _loginTypeToString(int type) {
+    switch (type) {
+      case 1: return 'google';
+      case 2: return 'kakao';
+      case 3: return 'naver';
+      default: return 'normal';
+    }
+  }
 }
 
 /// 세션 정보 모델

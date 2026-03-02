@@ -109,10 +109,11 @@ class AuthService {
   }
 
   /// 박스명 가져오기 (유료 사용자용)
-  Future<ApiResponse> getBoxName(String deviceId, String version) async {
+  Future<ApiResponse> getBoxName(String version, {required String deviceId, String? deviceName}) async {
     return await _api.postJson('api/devices/register/paid', data: {
       'localBox': deviceId,
-      'deviceName': deviceId,
+      'deviceName': deviceName ?? deviceId,
+      'deviceId': deviceId,
       'deviceVersion': version,
     });
   }

@@ -104,9 +104,11 @@ class _MobileMyPageState extends State<MobileMyPage> {
           // 현재 플랜
           _buildPlanCard(),
           const SizedBox(height: 16),
-          // 비밀번호 변경
-          _buildChangePasswordCard(),
-          const SizedBox(height: 16),
+          // 비밀번호 변경 (소셜 로그인이 아닌 경우만 표시)
+          if (gFFI.userModel.loginType.value == 0) ...[
+            _buildChangePasswordCard(),
+            const SizedBox(height: 16),
+          ],
           // 정책
           _buildPolicyCard(),
           const SizedBox(height: 4),

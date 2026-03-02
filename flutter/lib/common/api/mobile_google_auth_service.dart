@@ -3,6 +3,7 @@
 library;
 
 import 'dart:async';
+import 'dart:io' show Platform;
 
 import 'package:flutter/material.dart';
 import 'package:flutter_inappwebview/flutter_inappwebview.dart';
@@ -75,11 +76,14 @@ class MobileGoogleAuthService {
                 // 세션 등록 및 활성화
                 if (isSessionServiceInitialized()) {
                   final sessionService = getSessionService();
-                  final deviceId = await bind.mainGetMyId();
                   final version = await bind.mainGetVersion();
 
                   final registerRes =
-                      await sessionService.registerSession(deviceId, version);
+                      await sessionService.registerSession(
+                        version,
+                        deviceId: platformFFI.deviceId,
+                        deviceName: platformFFI.deviceName,
+                      );
                   if (registerRes.success) {
                     final deviceKey = registerRes.extract('deviceKey') ?? '';
                     userInfo.deviceKey = deviceKey;
@@ -201,7 +205,9 @@ class _GoogleLoginWebViewState extends State<_GoogleLoginWebView> {
               useShouldOverrideUrlLoading: true,
               javaScriptEnabled: true,
               useHybridComposition: true,
-              userAgent: 'Mozilla/5.0 (Linux; Android 14; SM-S928B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Mobile Safari/537.36',
+              userAgent: Platform.isIOS
+                  ? 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_3 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.3 Mobile/15E148 Safari/604.1'
+                  : 'Mozilla/5.0 (Linux; Android 14; SM-S928B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Mobile Safari/537.36',
             ),
             shouldOverrideUrlLoading: (controller, navigationAction) async {
               final uri = navigationAction.request.url;

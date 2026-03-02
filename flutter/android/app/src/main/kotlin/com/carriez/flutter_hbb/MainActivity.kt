@@ -15,6 +15,7 @@ import android.content.Intent
 import android.content.ServiceConnection
 import android.content.ClipboardManager
 import android.provider.DocumentsContract
+import android.provider.Settings
 import android.net.Uri
 import android.os.Bundle
 import android.os.Build
@@ -277,6 +278,10 @@ class MainActivity : FlutterActivity() {
                 }
                 "on_voice_call_closed" -> {
                     onVoiceCallClosed()
+                }
+                "get_android_id" -> {
+                    val androidId = Settings.Secure.getString(contentResolver, Settings.Secure.ANDROID_ID)
+                    result.success(androidId ?: "")
                 }
                 "open_folder" -> {
                     if (call.arguments is String) {
