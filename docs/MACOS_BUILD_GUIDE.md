@@ -122,19 +122,18 @@ import sqflite
 import sqflite_darwin
 ```
 
-### 7-3. 아키텍처 설정 (Apple Silicon)
+### 7-3. 아키텍처 설정
 
-Rust 라이브러리가 arm64로만 빌드되므로, Xcode 프로젝트도 arm64만 타겟팅해야 합니다.
+**arm64 전용 빌드 (기본):** Rust 라이브러리가 arm64로만 빌드되므로, Xcode 프로젝트도 arm64만 타겟팅해야 합니다.
 
 **`flutter/macos/Runner.xcodeproj/project.pbxproj`:**
 
 3곳의 `ARCHS` 설정을 변경:
 ```
-// 변경 전
-ARCHS = "$(ARCHS_STANDARD)";
-// 변경 후
 ARCHS = arm64;
 ```
+
+**유니버셜 빌드:** x86_64 + arm64 유니버셜 PKG를 빌드하려면 아래의 "유니버셜 PKG 빌드" 섹션을 참조하세요. 이 경우 `ARCHS = "$(ARCHS_STANDARD)";`으로 설정합니다.
 
 ### 7-4. CocoaPods 설치
 
@@ -201,9 +200,103 @@ create-dmg \
   ./flutter/build/macos/Build/Products/Release/OneDesk.app
 ```
 
+## 유니버셜 (x86_64 + arm64) PKG 빌드
+
+Intel Mac과 Apple Silicon Mac 모두에서 동작하는 유니버셜 바이너리 PKG를 만들 수 있습니다.
+
+### 사전 준비
+
+```bash
+# x86_64 Rust 타겟 설치
+rustup target add x86_64-apple-darwin
+
+# vcpkg x64-osx 의존성 설치 (프로젝트 디렉토리에서 실행)
+cd /path/to/onedesk
+export VCPKG_ROOT=~/vcpkg
+$VCPKG_ROOT/vcpkg install --triplet x64-osx --x-install-root="$VCPKG_ROOT/installed"
+
+# ffmpeg은 manifest mode에서 host-only로 설치되므로 classic mode로 별도 설치
+cd /tmp
+$VCPKG_ROOT/vcpkg install "ffmpeg[core]:x64-osx" \
+  --overlay-ports=/path/to/onedesk/res/vcpkg \
+  --x-install-root="$VCPKG_ROOT/installed"
+```
+
+### Xcode 프로젝트 아키텍처 설정
+
+`flutter/macos/Runner.xcodeproj/project.pbxproj` 파일에서 3곳의 `ARCHS` 설정을 변경:
+```
+// arm64 전용 → 유니버셜
+ARCHS = arm64;
+// 변경 후
+ARCHS = "$(ARCHS_STANDARD)";
+```
+
+### 빌드 절차
+
+```bash
+export VCPKG_ROOT=~/vcpkg
+
+# 1. x86_64 Rust 빌드
+MACOSX_DEPLOYMENT_TARGET=10.14 cargo build \
+  --features flutter,hwcodec,unix-file-copy-paste,screencapturekit \
+  --release --target x86_64-apple-darwin
+
+# 2. aarch64 Rust 빌드
+MACOSX_DEPLOYMENT_TARGET=10.14 cargo build \
+  --features flutter,hwcodec,unix-file-copy-paste,screencapturekit \
+  --release --target aarch64-apple-darwin
+
+# 3. lipo로 유니버셜 바이너리 생성
+mkdir -p target/universal-apple-darwin/release
+lipo -create \
+  target/x86_64-apple-darwin/release/liblibonedesk.dylib \
+  target/aarch64-apple-darwin/release/liblibonedesk.dylib \
+  -output target/universal-apple-darwin/release/liblibonedesk.dylib
+
+lipo -create \
+  target/x86_64-apple-darwin/release/service \
+  target/aarch64-apple-darwin/release/service \
+  -output target/universal-apple-darwin/release/service
+
+# 4. 유니버셜 바이너리를 target/release에 복사 (build.py가 참조하는 경로)
+cp target/universal-apple-darwin/release/liblibonedesk.dylib target/release/liblibonedesk.dylib
+cp target/universal-apple-darwin/release/liblibonedesk.dylib target/release/libonedesk.dylib
+cp target/universal-apple-darwin/release/service target/release/service
+
+# 5. Flutter 빌드 + PKG 패키징 (--skip-cargo로 Rust 빌드 건너뛰기)
+python3 build.py --flutter --hwcodec --unix-file-copy-paste --screencapturekit --pkg --skip-cargo
+
+# 6. 파일명 변경 (aarch64 → universal)
+mv onedesk-1.4.4-aarch64.pkg onedesk-1.4.4-universal.pkg
+```
+
+### 검증
+
+빌드된 앱 번들의 바이너리가 유니버셜인지 확인:
+```bash
+file flutter/build/macos/Build/Products/Release/OneDesk.app/Contents/MacOS/OneDesk
+# 출력: Mach-O universal binary with 2 architectures: [x86_64] [arm64]
+
+file flutter/build/macos/Build/Products/Release/OneDesk.app/Contents/MacOS/service
+# 출력: Mach-O universal binary with 2 architectures: [x86_64] [arm64]
+
+file flutter/build/macos/Build/Products/Release/OneDesk.app/Contents/Frameworks/liblibonedesk.dylib
+# 출력: Mach-O universal binary with 2 architectures: [x86_64] [arm64]
+```
+
+### 참고사항
+
+- x86_64 빌드에서 `src/platform/macos.rs`의 `BOOL` 타입 차이 주의: arm64에서 `BOOL`은 `bool`, x86_64에서는 `i8` (`signed char`). `added != NO` 형태로 비교해야 양쪽 모두 컴파일됨.
+- 전체 빌드 소요 시간: 약 10~15분 (Rust x86_64 ~2분, Rust aarch64 ~3분, Flutter ~3분, 패키징 ~1분)
+- `--screencapturekit` 옵션은 macOS 12.3+ 전용이지만 x86_64에서도 빌드 가능 (런타임 체크)
+- arm64 전용으로 되돌리려면 `ARCHS = arm64;`로 복원
+
 ## 빌드 결과물
 
 - `.app` 번들: `flutter/build/macos/Build/Products/Release/OneDesk.app` (~60MB)
+- arm64 PKG: `onedesk-1.4.4-aarch64.pkg` (기본 빌드 시)
+- 유니버셜 PKG: `onedesk-1.4.4-universal.pkg` (유니버셜 빌드 시)
 - DMG 패키지: `onedesk-1.4.4-aarch64.dmg` (DMG 생성 시)
 
 ## 환경 변수 요약

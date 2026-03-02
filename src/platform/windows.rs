@@ -3106,13 +3106,55 @@ pub fn try_start_service_if_not_running() {
 
     if !is_self_service_running() {
         let app_name = crate::get_app_name();
-        log::info!("Service is not running, attempting to start with UAC: {}", app_name);
-        // sc start requires admin privileges, use ShellExecute with "runas" verb
-        match run_uac("sc", &format!("start {}", app_name)) {
-            Ok(true) => log::info!("Service start UAC request succeeded"),
-            Ok(false) => log::warn!("Service start UAC request was denied by user"),
-            Err(e) => log::error!("Service start UAC request failed: {}", e),
+        let (_, _, _, exe) = get_install_info();
+        log::info!("Service is not running, checking if service exists: {}", app_name);
+
+        // Check if the service is registered (no admin rights needed)
+        let service_exists = std::process::Command::new("sc")
+            .args(["query", &app_name])
+            .creation_flags(CREATE_NO_WINDOW)
+            .output()
+            .map(|o| o.status.success())
+            .unwrap_or(false);
+
+        if !service_exists {
+            // Service doesn't exist - create it first, then start.
+            // This handles the case where MSI custom action failed to register
+            // the service (e.g., on ARM64 Windows with x64 MSI).
+            log::info!("Service does not exist, creating and starting: {}", app_name);
+            let cmds = format!(
+                "sc create {app_name} binpath= \"\\\"{exe}\\\" --service\" start= auto DisplayName= \"{app_name} Service\"\nsc start {app_name}\n",
+                app_name = app_name,
+                exe = exe,
+            );
+            if let Err(e) = run_cmds(cmds, false, "create_start_service") {
+                log::error!("Failed to create/start service: {}", e);
+            }
+        } else {
+            // Service exists but not running - just start it
+            log::info!("Service exists but not running, starting: {}", app_name);
+            match run_uac("sc", &format!("start {}", app_name)) {
+                Ok(true) => log::info!("Service start UAC request succeeded"),
+                Ok(false) => log::warn!("Service start UAC request was denied by user"),
+                Err(e) => log::error!("Service start UAC request failed: {}", e),
+            }
         }
+
+        // Wait for the service to actually start, then launch the tray process.
+        // The tray check in core_main runs before this function, so when the service
+        // was stopped, the tray never gets started. We handle it here as a fallback.
+        for _ in 0..10 {
+            std::thread::sleep(Duration::from_secs(1));
+            if is_self_service_running() {
+                log::info!("Service is now running, checking tray process");
+                if !crate::check_process("--tray", true) {
+                    log::info!("Tray not running, launching tray process");
+                    hbb_common::allow_err!(crate::run_me(vec!["--tray"]));
+                }
+                return;
+            }
+        }
+        log::warn!("Service did not start within timeout");
     } else {
         log::info!("Service is already running");
     }

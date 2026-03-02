@@ -1115,7 +1115,7 @@ pub fn setup_reopen_handler() {
                 imp,
                 types.as_ptr(),
             );
-            if added {
+            if added != NO {
                 log::info!("Reopen handler added to tao delegate");
             } else {
                 log::error!("Failed to add reopen handler");
