@@ -172,21 +172,22 @@ void runMainApp(bool startService) async {
         bind.mainGetBuildinOption(key: "main-window-always-on-top") == 'Y';
   }
 
-  // Compute screen-aware window size and minimum size.
-  // At high DPI (150%, 200%), the logical screen shrinks so we cap accordingly.
-  double _initW = 800, _initH = 600;
+  // Convert physical target size to logical pixels using the screen's scale factor.
+  // This ensures the window occupies the same physical pixels at any DPI (100%/150%/200%).
+  // Physical target: 880×660 px  →  100%: 880×660 logical, 150%: 587×440 logical, 200%: 440×330 logical
+  const double kTargetPhysicalW = 880.0;
+  const double kTargetPhysicalH = 660.0;
+  double _initW = kTargetPhysicalW;
+  double _initH = kTargetPhysicalH;
   double _minW = kMainWindowMinWidth, _minH = kMainWindowMinHeight;
   if (isWindows || isLinux) {
     final screens = await window_size.getScreenList();
     if (screens.isNotEmpty) {
-      final sw = screens.first.visibleFrame.width;
-      final sh = screens.first.visibleFrame.height;
-      // Window: at most 60% of screen width / 75% of screen height, max 800x600
-      _initW = min(800.0, max(700.0, sw * 0.60));
-      _initH = min(600.0, max(500.0, sh * 0.75));
-      // Minimum size: cap to 55% / 65% of screen so it never exceeds the screen
-      _minW = min(kMainWindowMinWidth, max(600.0, sw * 0.55));
-      _minH = min(kMainWindowMinHeight, max(450.0, sh * 0.65));
+      final scale = screens.first.scaleFactor > 0 ? screens.first.scaleFactor : 1.0;
+      _initW = (kTargetPhysicalW / scale).clamp(500.0, kTargetPhysicalW);
+      _initH = (kTargetPhysicalH / scale).clamp(400.0, kTargetPhysicalH);
+      _minW = min(kMainWindowMinWidth, _initW * 0.80);
+      _minH = min(kMainWindowMinHeight, _initH * 0.80);
     }
   }
 
@@ -197,13 +198,9 @@ void runMainApp(bool startService) async {
       alwaysOnTop: alwaysOnTop);
   windowManager.waitUntilReadyToShow(windowOptions, () async {
     await windowManager.setMinimumSize(Size(_minW, _minH));
-    // Restore the location of the main window before window hide or show.
+    // Restore saved position (x, y), then enforce our DPI-normalized size.
     await restoreWindowPosition(WindowType.Main);
-    // Override size after restore: ensure it fits the screen at any DPI scale
-    final curSize = await windowManager.getSize();
-    if (curSize.width > _initW * 1.1 || curSize.height > _initH * 1.1) {
-      await windowManager.setSize(Size(_initW, _initH));
-    }
+    await windowManager.setSize(Size(_initW, _initH));
     // Check the startup argument, if we successfully handle the argument, we keep the main window hidden.
     final handledByUniLinks = await initUniLinks();
     debugPrint("handled by uni links: $handledByUniLinks");
