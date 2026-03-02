@@ -148,7 +148,8 @@ class _PeerCardState extends State<_PeerCard>
                   logoColor,
                   BlendMode.srcIn,
                 ),
-                child: getPlatformImage(peer.platform, size: 30),
+                child: getPlatformImage(peer.platform,
+                    size: 30, version: peer.osVersion),
               ).paddingAll(6),
               if (_shouldBuildPasswordIcon(peer))
                 Positioned(
@@ -288,7 +289,8 @@ class _PeerCardState extends State<_PeerCard>
                     BlendMode.srcIn,
                   ),
                   child: getPlatformImage(peer.platform,
-                      size: isPortrait ? 38 : 32),
+                      size: isPortrait ? 38 : 32,
+                      version: peer.osVersion),
                 ).paddingAll(6),
                 if (_shouldBuildPasswordIcon(peer))
                   Positioned(
@@ -438,6 +440,9 @@ class _PeerCardState extends State<_PeerCard>
     } else if (platform == kPeerPlatformAndroid ||
         platform.toLowerCase().contains('android')) {
       return 'Android';
+    } else if (platform == kPeerPlatformIOS ||
+        platform.toLowerCase().contains('ios')) {
+      return 'iOS';
     }
     return platform;
   }
@@ -514,7 +519,8 @@ class _PeerCardState extends State<_PeerCard>
                                       BlendMode.srcIn,
                                     ),
                                     child: getPlatformImage(peer.platform,
-                                        size: 32),
+                                        size: 32,
+                                        version: peer.osVersion),
                                   ),
                                   const SizedBox(width: 8),
                                   // OS 버전 텍스트 (예: "Windows 11 Pro")

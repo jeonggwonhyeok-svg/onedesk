@@ -546,6 +546,10 @@ class ServerModel with ChangeNotifier {
       if (desktopType == DesktopType.cm && !hideCm) {
         showCmWindow();
       }
+      // Prompt macOS permissions if not granted when a connection comes in.
+      if (isMacOS) {
+        _promptMacPermissionsIfNeeded();
+      }
       scrollToBottom();
       notifyListeners();
       if (!client.authorized) {
@@ -557,6 +561,18 @@ class ServerModel with ChangeNotifier {
       if (isAndroid) androidUpdatekeepScreenOn();
     } catch (e) {
       debugPrint("Failed to call loginRequest,error:$e");
+    }
+  }
+
+  void _promptMacPermissionsIfNeeded() {
+    if (!bind.mainIsCanScreenRecording(prompt: false)) {
+      bind.mainIsCanScreenRecording(prompt: true);
+    }
+    if (!bind.mainIsProcessTrusted(prompt: false)) {
+      bind.mainIsProcessTrusted(prompt: true);
+    }
+    if (!bind.mainIsCanInputMonitoring(prompt: false)) {
+      bind.mainIsCanInputMonitoring(prompt: true);
     }
   }
 
@@ -648,6 +664,17 @@ class ServerModel with ChangeNotifier {
     }
   }
 
+  /// 피어 캐시에서 OS 버전 정보 조회
+  String _getPeerOsVersion(String peerId) {
+    try {
+      final peer = bind.mainGetPeerSync(id: peerId);
+      final config = jsonDecode(peer);
+      return config['info']?['os_version'] ?? '';
+    } catch (e) {
+      return '';
+    }
+  }
+
   /// 피어 ID를 포맷팅 (123 456 789 형태)
   String _formatPeerId(String peerId) {
     final cleanId = peerId.replaceAll(RegExp(r'[^0-9]'), '');
@@ -711,9 +738,10 @@ class ServerModel with ChangeNotifier {
                 ),
                 child: Center(
                   child: getPlatformImage(
-                    _getPeerPlatform(client.peerId),
+                    client.peerPlatform.isNotEmpty ? client.peerPlatform : _getPeerPlatform(client.peerId),
                     size: 24,
                     color: _cmAccentColor,
+                    version: _getPeerOsVersion(client.peerId),
                   ),
                 ),
               ),
@@ -998,6 +1026,7 @@ class Client {
   bool fromSwitch = false;
   bool inVoiceCall = false;
   bool incomingVoiceCall = false;
+  String peerPlatform = "";
 
   RxInt unreadChatMessageCount = 0.obs;
 
@@ -1025,6 +1054,7 @@ class Client {
     fromSwitch = json['from_switch'];
     inVoiceCall = json['in_voice_call'];
     incomingVoiceCall = json['incoming_voice_call'];
+    peerPlatform = json['peer_platform'] ?? '';
   }
 
   Map<String, dynamic> toJson() {

@@ -90,10 +90,15 @@ class _SignupPageState extends State<SignupPage> {
 
   /// 인증번호 전송
   Future<void> _sendVerificationCode() async {
+    final name = _nameController.text.trim();
     final email = _emailController.text.trim();
 
+    if (name.isEmpty) {
+      setState(() => _nameError = translate('Enter your name'));
+      return;
+    }
     if (email.isEmpty) {
-      setState(() => _emailError = translate('Please enter your email'));
+      setState(() => _emailError = translate('Enter your email'));
       return;
     }
     if (!_emailRegex.hasMatch(email)) {
@@ -122,9 +127,9 @@ class _SignupPageState extends State<SignupPage> {
 
       // 2. 인증코드 발송
       final sendRes = await authService.sendVerificationEmail(email);
-      if (!sendRes.success && !sendRes.rawBody.contains('성공')) {
+      if (!sendRes.rawBody.contains('성공')) {
         setState(() {
-          _emailError = translate('Failed to send verification code');
+          _emailError = translate('Bad Request');
           _isInProgress = false;
         });
         return;
@@ -138,7 +143,7 @@ class _SignupPageState extends State<SignupPage> {
       showToast(translate('Verification code sent'));
     } catch (e) {
       setState(() {
-        _emailError = e.toString();
+        _emailError = translate('Bad Request');
         _isInProgress = false;
       });
     }
@@ -146,14 +151,8 @@ class _SignupPageState extends State<SignupPage> {
 
   /// 1단계 → 2단계 이동 (인증번호 확인)
   Future<void> _goToStep2() async {
-    final name = _nameController.text.trim();
     final email = _emailController.text.trim();
     final code = _codeController.text.trim();
-
-    if (name.isEmpty) {
-      setState(() => _nameError = translate('Please enter your name'));
-      return;
-    }
 
     if (code.isEmpty) {
       setState(() => _codeError = translate('Please enter verification code'));
@@ -170,7 +169,7 @@ class _SignupPageState extends State<SignupPage> {
       final authService = getAuthService();
       final verifyRes = await authService.verifyEmailCode(email, code);
 
-      if (!verifyRes.success && !verifyRes.rawBody.contains('성공')) {
+      if (!verifyRes.rawBody.contains('성공')) {
         setState(() {
           _codeError = translate('Invalid verification code');
           _isInProgress = false;
@@ -184,7 +183,7 @@ class _SignupPageState extends State<SignupPage> {
       });
     } catch (e) {
       setState(() {
-        _codeError = e.toString();
+        _codeError = translate('Bad Request');
         _isInProgress = false;
       });
     }
@@ -217,13 +216,13 @@ class _SignupPageState extends State<SignupPage> {
 
     if (!_passwordRegex.hasMatch(password)) {
       setState(() => _passwordError = translate(
-          'Password must be at least 8 characters with letters, numbers and special characters'));
+          'Password requirements not met'));
       return;
     }
 
     if (password != confirmPassword) {
       setState(
-          () => _confirmPasswordError = translate('Passwords do not match'));
+          () => _confirmPasswordError = translate('The confirmation is not identical.'));
       return;
     }
 
@@ -243,10 +242,9 @@ class _SignupPageState extends State<SignupPage> {
       final signupRes =
           await authService.signup(name, email, password, confirmPassword);
 
-      if (!signupRes.success && !signupRes.rawBody.contains('성공')) {
+      if (!signupRes.rawBody.contains('성공')) {
         setState(() {
-          _passwordError = signupRes.message ??
-              translate('Signup failed. Please try again.');
+          _passwordError = translate('Bad Request');
           _isInProgress = false;
         });
         return;
@@ -258,7 +256,7 @@ class _SignupPageState extends State<SignupPage> {
       });
     } catch (e) {
       setState(() {
-        _passwordError = e.toString();
+        _passwordError = translate('Bad Request');
         _isInProgress = false;
       });
     }
@@ -266,7 +264,8 @@ class _SignupPageState extends State<SignupPage> {
 
   /// 인증번호 전송 버튼 활성화 여부
   bool get _canSendCode {
-    return _emailController.text.trim().isNotEmpty &&
+    return _nameController.text.trim().isNotEmpty &&
+        _emailController.text.trim().isNotEmpty &&
         _sendCooldown == 0 &&
         !_isInProgress;
   }
@@ -288,9 +287,67 @@ class _SignupPageState extends State<SignupPage> {
         _isAgreed;
   }
 
+  /// 헤더 위젯 (뒤로가기 + 타이틀)
+  /// 데스크탑: 중앙 정렬 + chevron_left, 모바일: 좌측 정렬 + arrow_back_ios
+  Widget _buildHeader(String title, VoidCallback onBack) {
+    if (isDesktop) {
+      return Stack(
+        alignment: Alignment.center,
+        children: [
+          Align(
+            alignment: Alignment.centerLeft,
+            child: IconButton(
+              onPressed: onBack,
+              icon: const Icon(Icons.chevron_left, size: 20),
+              padding: EdgeInsets.zero,
+              constraints: const BoxConstraints(),
+            ),
+          ),
+          Text(
+            title,
+            style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w600),
+          ),
+        ],
+      );
+    }
+    // 모바일: 좌측 정렬
+    return Row(
+      children: [
+        IconButton(
+          onPressed: onBack,
+          icon: const Icon(Icons.arrow_back_ios, color: Color(0xFF454447), size: 20),
+          padding: EdgeInsets.zero,
+          constraints: const BoxConstraints(),
+        ),
+        const SizedBox(width: 4),
+        Text(
+          title,
+          style: const TextStyle(
+            color: Color(0xFF454447),
+            fontSize: 18,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+      ],
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
+    // 모바일: 헤더를 스크롤 영역 밖에 고정
+    Widget? mobileHeader;
+    if (!isDesktop && _currentStep < 3) {
+      mobileHeader = Padding(
+        padding: const EdgeInsets.only(top: 8, bottom: 8),
+        child: _buildHeader(
+          translate('Sign Up'),
+          _currentStep == 1 ? widget.onBackToLogin : _goBackToStep1,
+        ),
+      );
+    }
+
     return AuthPageLayout(
+      mobileHeader: mobileHeader,
       formContent: _currentStep == 1
           ? _buildStep1()
           : _currentStep == 2
@@ -304,27 +361,11 @@ class _SignupPageState extends State<SignupPage> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        // 상단 여백
-        const SizedBox(height: 8),
-        // 헤더 (맨 위) - 버튼 왼쪽, 텍스트 가운데
-        Stack(
-          alignment: Alignment.center,
-          children: [
-            Align(
-              alignment: Alignment.centerLeft,
-              child: IconButton(
-                onPressed: widget.onBackToLogin,
-                icon: const Icon(Icons.chevron_left, size: 20),
-                padding: EdgeInsets.zero,
-                constraints: const BoxConstraints(),
-              ),
-            ),
-            Text(
-              translate('Sign Up'),
-              style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w600),
-            ),
-          ],
-        ),
+        // 헤더 (데스크탑만 - 모바일은 AuthPageLayout.mobileHeader로 고정)
+        if (isDesktop) ...[
+          const SizedBox(height: 8),
+          _buildHeader(translate('Sign Up'), widget.onBackToLogin),
+        ],
 
         // 폼 영역 (가운데)
         Expanded(
@@ -431,27 +472,11 @@ class _SignupPageState extends State<SignupPage> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        // 상단 여백
-        const SizedBox(height: 8),
-        // 헤더 (맨 위) - 버튼 왼쪽, 텍스트 가운데
-        Stack(
-          alignment: Alignment.center,
-          children: [
-            Align(
-              alignment: Alignment.centerLeft,
-              child: IconButton(
-                onPressed: _goBackToStep1,
-                icon: const Icon(Icons.chevron_left, size: 20),
-                padding: EdgeInsets.zero,
-                constraints: const BoxConstraints(),
-              ),
-            ),
-            Text(
-              translate('Sign Up'),
-              style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w600),
-            ),
-          ],
-        ),
+        // 헤더 (데스크탑만 - 모바일은 AuthPageLayout.mobileHeader로 고정)
+        if (isDesktop) ...[
+          const SizedBox(height: 8),
+          _buildHeader(translate('Sign Up'), _goBackToStep1),
+        ],
 
         // 폼 영역 (가운데)
         Expanded(
@@ -554,16 +579,11 @@ class _SignupPageState extends State<SignupPage> {
                 Row(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    SizedBox(
-                      width: 24,
-                      height: 24,
-                      child: Checkbox(
-                        value: _isAgreed,
-                        onChanged: (value) =>
-                            setState(() => _isAgreed = value ?? false),
-                        shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(4)),
-                      ),
+                    StyledCheckbox(
+                      value: _isAgreed,
+                      onChanged: (value) =>
+                          setState(() => _isAgreed = value ?? false),
+                      accentColor: kFormPrimaryColor,
                     ),
                     const SizedBox(width: 8),
                     Expanded(
@@ -578,7 +598,6 @@ class _SignupPageState extends State<SignupPage> {
                                 text: translate('Privacy Policy'),
                                 style: const TextStyle(
                                   color: Color(0xFF5B7BF8),
-                                  decoration: TextDecoration.underline,
                                 ),
                               ),
                               TextSpan(text: translate(' and ')),
@@ -586,7 +605,6 @@ class _SignupPageState extends State<SignupPage> {
                                 text: translate('Terms of Service'),
                                 style: const TextStyle(
                                   color: Color(0xFF5B7BF8),
-                                  decoration: TextDecoration.underline,
                                 ),
                               ),
                               TextSpan(text: translate(' agree.')),

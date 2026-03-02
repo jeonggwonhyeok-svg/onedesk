@@ -32,6 +32,7 @@ class _MobileSetPasswordPageState extends State<MobileSetPasswordPage> {
   bool _obscureConfirm = true;
   String _errMsg0 = '';
   String _errMsg1 = '';
+  bool _showComplete = false;
 
   final _rules = [
     DigitValidationRule(),
@@ -87,20 +88,19 @@ class _MobileSetPasswordPageState extends State<MobileSetPasswordPage> {
     }
 
     await bind.mainSetPermanentPassword(password: pass);
-    if (pass.isNotEmpty) {
-      widget.onSuccess?.call();
-    }
 
     if (mounted) {
-      Navigator.pop(context);
       if (pass.isNotEmpty) {
-        showToast(translate('Password saved'));
+        setState(() => _showComplete = true);
+      } else {
+        Navigator.pop(context);
       }
     }
   }
 
   @override
   Widget build(BuildContext context) {
+    if (_showComplete) return _buildCompleteScreen();
     return Scaffold(
       backgroundColor: Colors.white,
       appBar: AppBar(
@@ -119,7 +119,8 @@ class _MobileSetPasswordPageState extends State<MobileSetPasswordPage> {
             fontWeight: FontWeight.w600,
           ),
         ),
-        centerTitle: true,
+        centerTitle: false,
+        titleSpacing: 0,
       ),
       body: Column(
         children: [
@@ -207,6 +208,108 @@ class _MobileSetPasswordPageState extends State<MobileSetPasswordPage> {
           ),
           // 하단 버튼
           _buildBottomButtons(context),
+        ],
+      ),
+    );
+  }
+
+  /// 비밀번호 설정 완료 화면
+  Widget _buildCompleteScreen() {
+    return Scaffold(
+      backgroundColor: Colors.white,
+      appBar: AppBar(
+        backgroundColor: Colors.white,
+        elevation: 0,
+        surfaceTintColor: Colors.transparent,
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back_ios, color: _titleColor, size: 20),
+          onPressed: () {
+            widget.onSuccess?.call();
+            Navigator.pop(context);
+          },
+        ),
+        title: Text(
+          translate('Set permanent password'),
+          style: const TextStyle(
+            color: _titleColor,
+            fontSize: 18,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+        centerTitle: false,
+        titleSpacing: 0,
+      ),
+      body: Column(
+        children: [
+          Expanded(
+            child: Center(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Image.asset('assets/icons/sucess.png', width: 120, height: 120),
+                  const SizedBox(height: 24),
+                  Text(
+                    translate('Password setting complete'),
+                    style: const TextStyle(
+                      fontSize: 20,
+                      fontWeight: FontWeight.bold,
+                      color: Color(0xFF5B7BF8),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  Text(
+                    translate('Password setting has been completed.'),
+                    style: TextStyle(
+                      fontSize: 15,
+                      color: Colors.grey[600],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          // 하단 확인 버튼
+          Container(
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withValues(alpha: 0.05),
+                  blurRadius: 10,
+                  offset: const Offset(0, -2),
+                ),
+              ],
+            ),
+            child: SafeArea(
+              top: false,
+              child: SizedBox(
+                width: double.infinity,
+                child: ElevatedButton(
+                  onPressed: () {
+                    widget.onSuccess?.call();
+                    Navigator.pop(context);
+                  },
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: const Color(0xFF5B7BF8),
+                    foregroundColor: Colors.white,
+                    elevation: 0,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    padding: const EdgeInsets.symmetric(vertical: 16),
+                  ),
+                  child: Text(
+                    translate('OK'),
+                    style: const TextStyle(
+                      fontSize: 15,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
         ],
       ),
     );

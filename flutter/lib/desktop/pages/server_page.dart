@@ -31,12 +31,24 @@ const Color _cmTextPrimary = Color(0xFF454447);
 const Color _cmAccentColor = Color(0xFF5F71FF);
 const Color _cmIconBgColor = Color(0xFFEFF1FF);
 
-/// 피어 캐시에서 platform 정보 조회
-String _getPeerPlatform(String peerId) {
+/// Client 데이터에서 platform 조회, 없으면 피어 캐시 fallback
+String _getPeerPlatform(String peerId, {String peerPlatform = ''}) {
+  if (peerPlatform.isNotEmpty) return peerPlatform;
   try {
     final peer = bind.mainGetPeerSync(id: peerId);
     final config = jsonDecode(peer);
     return config['info']?['platform'] ?? config['platform'] ?? '';
+  } catch (e) {
+    return '';
+  }
+}
+
+/// 피어 캐시에서 OS 버전 정보 조회
+String _getPeerOsVersion(String peerId) {
+  try {
+    final peer = bind.mainGetPeerSync(id: peerId);
+    final config = jsonDecode(peer);
+    return config['info']?['os_version'] ?? '';
   } catch (e) {
     return '';
   }
@@ -515,9 +527,10 @@ class _CmHeaderState extends State<_CmHeader>
             ),
             child: Center(
               child: getPlatformImage(
-                _getPeerPlatform(client.peerId),
+                _getPeerPlatform(client.peerId, peerPlatform: client.peerPlatform),
                 size: 24,
                 color: _cmAccentColor,
+                version: _getPeerOsVersion(client.peerId),
               ),
             ),
           ),
@@ -525,6 +538,8 @@ class _CmHeaderState extends State<_CmHeader>
           // 요청 유저 이름
           Text(
             '[${client.name}]',
+            overflow: TextOverflow.ellipsis,
+            maxLines: 1,
             style: const TextStyle(
               fontSize: 19,
               fontWeight: FontWeight.bold,
@@ -535,6 +550,8 @@ class _CmHeaderState extends State<_CmHeader>
           // 피어 ID
           Text(
             '[${_formatPeerId(client.peerId)}]',
+            overflow: TextOverflow.ellipsis,
+            maxLines: 1,
             style: const TextStyle(
               fontSize: 16,
               color: _cmTextPrimary,
@@ -624,35 +641,42 @@ class _CmHeaderState extends State<_CmHeader>
                       ),
                       child: Center(
                         child: getPlatformImage(
-                          _getPeerPlatform(client.peerId),
+                          _getPeerPlatform(client.peerId, peerPlatform: client.peerPlatform),
                           size: 24,
                           color: _cmAccentColor,
+                          version: _getPeerOsVersion(client.peerId),
                         ),
                       ),
                     ),
                     const SizedBox(width: 16),
                     // 유저 정보
-                    Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Text(
-                          '[${client.name}]',
-                          style: const TextStyle(
-                            fontSize: 19,
-                            fontWeight: FontWeight.bold,
-                            color: _cmTextPrimary,
+                    Flexible(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Text(
+                            '[${client.name}]',
+                            overflow: TextOverflow.ellipsis,
+                            maxLines: 1,
+                            style: const TextStyle(
+                              fontSize: 19,
+                              fontWeight: FontWeight.bold,
+                              color: _cmTextPrimary,
+                            ),
                           ),
-                        ),
-                        const SizedBox(height: 4),
-                        Text(
-                          '[${_formatPeerId(client.peerId)}]',
-                          style: const TextStyle(
-                            fontSize: 16,
-                            color: _cmTextPrimary,
+                          const SizedBox(height: 4),
+                          Text(
+                            '[${_formatPeerId(client.peerId)}]',
+                            overflow: TextOverflow.ellipsis,
+                            maxLines: 1,
+                            style: const TextStyle(
+                              fontSize: 16,
+                              color: _cmTextPrimary,
+                            ),
                           ),
-                        ),
-                      ],
+                        ],
+                      ),
                     ),
                   ],
                 ),
@@ -1070,35 +1094,42 @@ class _VoiceChatCardState extends State<_VoiceChatCard> {
                       ),
                       child: Center(
                         child: getPlatformImage(
-                          _getPeerPlatform(widget.client.peerId),
+                          _getPeerPlatform(widget.client.peerId, peerPlatform: widget.client.peerPlatform),
                           size: 24,
                           color: _cmAccentColor,
+                          version: _getPeerOsVersion(widget.client.peerId),
                         ),
                       ),
                     ),
                     const SizedBox(width: 16),
                     // 유저 정보
-                    Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Text(
-                          '[${widget.client.name}]',
-                          style: const TextStyle(
-                            fontSize: 19,
-                            fontWeight: FontWeight.bold,
-                            color: _cmTextPrimary,
+                    Flexible(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Text(
+                            '[${widget.client.name}]',
+                            overflow: TextOverflow.ellipsis,
+                            maxLines: 1,
+                            style: const TextStyle(
+                              fontSize: 19,
+                              fontWeight: FontWeight.bold,
+                              color: _cmTextPrimary,
+                            ),
                           ),
-                        ),
-                        const SizedBox(height: 4),
-                        Text(
-                          '[${_formatPeerId(widget.client.peerId)}]',
-                          style: const TextStyle(
-                            fontSize: 16,
-                            color: _cmTextPrimary,
+                          const SizedBox(height: 4),
+                          Text(
+                            '[${_formatPeerId(widget.client.peerId)}]',
+                            overflow: TextOverflow.ellipsis,
+                            maxLines: 1,
+                            style: const TextStyle(
+                              fontSize: 16,
+                              color: _cmTextPrimary,
+                            ),
                           ),
-                        ),
-                      ],
+                        ],
+                      ),
                     ),
                   ],
                 ),

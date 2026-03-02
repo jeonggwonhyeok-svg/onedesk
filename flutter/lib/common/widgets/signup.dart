@@ -56,11 +56,18 @@ Future<bool?> signupDialog() async {
 
     // 이메일 중복 확인
     Future<void> checkEmailDuplicate() async {
+      final name = nameController.text.trim();
       final email = emailController.text.trim();
+
+      // 이름 유효성 검사
+      if (name.isEmpty) {
+        setState(() => nameError = translate('Enter your name'));
+        return;
+      }
 
       // 이메일 유효성 검사
       if (email.isEmpty) {
-        setState(() => emailError = translate('Please enter your email'));
+        setState(() => emailError = translate('Enter your email'));
         return;
       }
       if (!_emailRegex.hasMatch(email)) {
@@ -97,7 +104,7 @@ Future<bool?> signupDialog() async {
         showToast(translate('Email available'));
       } catch (e) {
         setState(() {
-          emailError = e.toString();
+          emailError = translate('Bad Request');
           isInProgress = false;
         });
       }
@@ -112,7 +119,7 @@ Future<bool?> signupDialog() async {
 
       // 유효성 검사
       if (name.isEmpty) {
-        setState(() => nameError = translate('Please enter your name'));
+        setState(() => nameError = translate('Enter your name'));
         return;
       }
 
@@ -133,12 +140,12 @@ Future<bool?> signupDialog() async {
 
       if (!_passwordRegex.hasMatch(password)) {
         setState(() => passwordError = translate(
-            'Password must be at least 8 characters with letters, numbers and special characters'));
+            'Password requirements not met'));
         return;
       }
 
       if (password != confirmPassword) {
-        setState(() => confirmPasswordError = translate('Passwords do not match'));
+        setState(() => confirmPasswordError = translate('The confirmation is not identical.'));
         return;
       }
 
@@ -154,9 +161,9 @@ Future<bool?> signupDialog() async {
         final signupRes = await authService.signup(name, email, password, confirmPassword);
 
         // 성공 여부 확인
-        if (!signupRes.success && !signupRes.rawBody.contains('성공')) {
+        if (!signupRes.rawBody.contains('성공')) {
           setState(() {
-            passwordError = signupRes.message ?? translate('Signup failed. Please try again.');
+            passwordError = translate('Bad Request');
             isInProgress = false;
           });
           return;
@@ -166,7 +173,7 @@ Future<bool?> signupDialog() async {
         close(true);
       } catch (e) {
         setState(() {
-          passwordError = e.toString();
+          passwordError = translate('Bad Request');
           isInProgress = false;
         });
       }

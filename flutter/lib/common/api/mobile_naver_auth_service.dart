@@ -56,7 +56,7 @@ class MobileNaverAuthService {
                 if (!pickupRes.success) {
                   completer.complete(MobileNaverAuthResult(
                     success: false,
-                    error: 'Token authentication failed',
+                    error: 'Bad Request',
                   ));
                   return;
                 }
@@ -66,7 +66,7 @@ class MobileNaverAuthService {
                 if (!meRes.success || meRes.data == null) {
                   completer.complete(MobileNaverAuthResult(
                     success: false,
-                    error: 'Failed to get user info',
+                    error: 'Bad Request',
                   ));
                   return;
                 }
@@ -107,7 +107,7 @@ class MobileNaverAuthService {
                 debugPrint('[MobileNaverAuth] Pickup error: $e');
                 completer.complete(MobileNaverAuthResult(
                   success: false,
-                  error: e.toString(),
+                  error: 'Bad Request',
                 ));
               }
             },
@@ -126,7 +126,7 @@ class MobileNaverAuthService {
       debugPrint('[MobileNaverAuth] Error: $e');
       return MobileNaverAuthResult(
         success: false,
-        error: e.toString(),
+        error: 'Bad Request',
       );
     }
   }
@@ -189,7 +189,8 @@ class _NaverLoginWebViewState extends State<_NaverLoginWebView> {
             fontWeight: FontWeight.w600,
           ),
         ),
-        centerTitle: true,
+        centerTitle: false,
+        titleSpacing: 0,
       ),
       body: Stack(
         children: [

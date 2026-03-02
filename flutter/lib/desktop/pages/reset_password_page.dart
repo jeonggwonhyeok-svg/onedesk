@@ -89,10 +89,15 @@ class _ResetPasswordPageState extends State<ResetPasswordPage> {
 
   /// 인증번호 전송
   Future<void> _sendVerificationCode() async {
+    final name = _nameController.text.trim();
     final email = _emailController.text.trim();
 
+    if (name.isEmpty) {
+      setState(() => _nameError = translate('Enter your name'));
+      return;
+    }
     if (email.isEmpty) {
-      setState(() => _emailError = translate('Please enter your email'));
+      setState(() => _emailError = translate('Enter your email'));
       return;
     }
     if (!_emailRegex.hasMatch(email)) {
@@ -121,7 +126,7 @@ class _ResetPasswordPageState extends State<ResetPasswordPage> {
 
       // 2. 인증코드 발송
       final sendRes = await authService.sendVerificationEmail(email);
-      if (!sendRes.success && !sendRes.rawBody.contains('성공')) {
+      if (!sendRes.rawBody.contains('성공')) {
         setState(() {
           _emailError = translate('Failed to send verification code');
           _isInProgress = false;
@@ -162,10 +167,8 @@ class _ResetPasswordPageState extends State<ResetPasswordPage> {
       final authService = getAuthService();
       final verifyRes = await authService.verifyEmailCode(email, code);
 
-      // API가 200을 반환하지만 result:false일 수 있음
-      if (verifyRes.rawBody.contains('일치하지 않습니다') ||
-          verifyRes.rawBody.contains('"result":false') ||
-          (!verifyRes.success && !verifyRes.rawBody.contains('성공'))) {
+      // 응답에 "성공"이 없으면 인증 실패
+      if (!verifyRes.rawBody.contains('성공')) {
         setState(() {
           _codeError = translate('Invalid verification code');
           _isInProgress = false;
@@ -210,13 +213,13 @@ class _ResetPasswordPageState extends State<ResetPasswordPage> {
 
     if (!_passwordRegex.hasMatch(password)) {
       setState(() => _passwordError = translate(
-          'Password must be at least 8 characters with letters, numbers and special characters'));
+          'Password requirements not met'));
       return;
     }
 
     if (password != confirmPassword) {
       setState(
-          () => _confirmPasswordError = translate('Passwords do not match'));
+          () => _confirmPasswordError = translate('The confirmation is not identical.'));
       return;
     }
 
@@ -231,10 +234,9 @@ class _ResetPasswordPageState extends State<ResetPasswordPage> {
       final resetRes =
           await authService.resetPassword(email, name, password, confirmPassword);
 
-      if (!resetRes.success && !resetRes.rawBody.contains('성공')) {
+      if (!resetRes.rawBody.contains('성공')) {
         setState(() {
-          _passwordError = resetRes.message ??
-              translate('Password reset failed. Please try again.');
+          _passwordError = translate('Bad Request');
           _isInProgress = false;
         });
         return;
@@ -254,7 +256,8 @@ class _ResetPasswordPageState extends State<ResetPasswordPage> {
 
   /// 인증번호 전송 버튼 활성화 여부
   bool get _canSendCode {
-    return _emailController.text.trim().isNotEmpty &&
+    return _nameController.text.trim().isNotEmpty &&
+        _emailController.text.trim().isNotEmpty &&
         _sendCooldown == 0 &&
         !_isInProgress;
   }
@@ -273,9 +276,67 @@ class _ResetPasswordPageState extends State<ResetPasswordPage> {
         password == confirmPassword;
   }
 
+  /// 헤더 위젯 (뒤로가기 + 타이틀)
+  /// 데스크탑: 중앙 정렬 + chevron_left, 모바일: 좌측 정렬 + arrow_back_ios
+  Widget _buildHeader(String title, VoidCallback onBack) {
+    if (isDesktop) {
+      return Stack(
+        alignment: Alignment.center,
+        children: [
+          Align(
+            alignment: Alignment.centerLeft,
+            child: IconButton(
+              onPressed: onBack,
+              icon: const Icon(Icons.chevron_left, size: 20),
+              padding: EdgeInsets.zero,
+              constraints: const BoxConstraints(),
+            ),
+          ),
+          Text(
+            title,
+            style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w600),
+          ),
+        ],
+      );
+    }
+    // 모바일: 좌측 정렬
+    return Row(
+      children: [
+        IconButton(
+          onPressed: onBack,
+          icon: const Icon(Icons.arrow_back_ios, color: Color(0xFF454447), size: 20),
+          padding: EdgeInsets.zero,
+          constraints: const BoxConstraints(),
+        ),
+        const SizedBox(width: 4),
+        Text(
+          title,
+          style: const TextStyle(
+            color: Color(0xFF454447),
+            fontSize: 18,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+      ],
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
+    // 모바일: 헤더를 스크롤 영역 밖에 고정
+    Widget? mobileHeader;
+    if (!isDesktop && _currentStep < 3) {
+      mobileHeader = Padding(
+        padding: const EdgeInsets.only(top: 8, bottom: 8),
+        child: _buildHeader(
+          translate('Find Password'),
+          _currentStep == 1 ? widget.onBackToLogin : _goBackToStep1,
+        ),
+      );
+    }
+
     return AuthPageLayout(
+      mobileHeader: mobileHeader,
       formContent: _currentStep == 1
           ? _buildStep1()
           : _currentStep == 2
@@ -289,27 +350,11 @@ class _ResetPasswordPageState extends State<ResetPasswordPage> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        // 상단 여백
-        const SizedBox(height: 8),
-        // 헤더 (맨 위) - 버튼 왼쪽, 텍스트 가운데
-        Stack(
-          alignment: Alignment.center,
-          children: [
-            Align(
-              alignment: Alignment.centerLeft,
-              child: IconButton(
-                onPressed: widget.onBackToLogin,
-                icon: const Icon(Icons.chevron_left, size: 20),
-                padding: EdgeInsets.zero,
-                constraints: const BoxConstraints(),
-              ),
-            ),
-            Text(
-              translate('Find Password'),
-              style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w600),
-            ),
-          ],
-        ),
+        // 헤더 (데스크탑만 - 모바일은 AuthPageLayout.mobileHeader로 고정)
+        if (isDesktop) ...[
+          const SizedBox(height: 8),
+          _buildHeader(translate('Find Password'), widget.onBackToLogin),
+        ],
 
         // 폼 영역 (가운데)
         Expanded(
@@ -332,6 +377,7 @@ class _ResetPasswordPageState extends State<ResetPasswordPage> {
                   errorText: _nameError,
                   onChanged: (_) {
                     if (_nameError != null) setState(() => _nameError = null);
+                    setState(() {}); // 버튼 상태 업데이트
                   },
                 ),
                 const SizedBox(height: 20),
@@ -415,27 +461,11 @@ class _ResetPasswordPageState extends State<ResetPasswordPage> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        // 상단 여백
-        const SizedBox(height: 8),
-        // 헤더 (맨 위) - 버튼 왼쪽, 텍스트 가운데
-        Stack(
-          alignment: Alignment.center,
-          children: [
-            Align(
-              alignment: Alignment.centerLeft,
-              child: IconButton(
-                onPressed: _goBackToStep1,
-                icon: const Icon(Icons.chevron_left, size: 20),
-                padding: EdgeInsets.zero,
-                constraints: const BoxConstraints(),
-              ),
-            ),
-            Text(
-              translate('Find Password'),
-              style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w600),
-            ),
-          ],
-        ),
+        // 헤더 (데스크탑만 - 모바일은 AuthPageLayout.mobileHeader로 고정)
+        if (isDesktop) ...[
+          const SizedBox(height: 8),
+          _buildHeader(translate('Find Password'), _goBackToStep1),
+        ],
 
         // 폼 영역 (가운데)
         Expanded(

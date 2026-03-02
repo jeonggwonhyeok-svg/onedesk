@@ -17,6 +17,7 @@ import '../../common/widgets/content_card.dart';
 import '../../consts.dart';
 import '../../models/model.dart';
 import '../../models/platform_model.dart';
+import 'plan_selection_page.dart' show showMobileAddonSessionDialog;
 import 'home_page.dart';
 
 /// Connection page for connecting to a remote peer.
@@ -381,9 +382,16 @@ class _ConnectionPageState extends State<ConnectionPage> {
               _buildMoreOptionsButton(),
             ],
           ),
-          const SizedBox(height: 16),
-          // 동시 접속 수 섹션
-          _buildConnectionCountSection(),
+          // 동시 접속 수 섹션 (FREE 플랜이 아닐 때만 표시)
+          Obx(() {
+            if (gFFI.userModel.planType.value == 'FREE') {
+              return const SizedBox.shrink();
+            }
+            return Padding(
+              padding: const EdgeInsets.only(top: 16),
+              child: _buildConnectionCountSection(),
+            );
+          }),
         ],
       ),
     );
@@ -436,8 +444,7 @@ class _ConnectionPageState extends State<ConnectionPage> {
           ),
           GestureDetector(
             onTap: () {
-              // 플랜 선택 페이지로 이동
-              Navigator.pushNamed(context, '/plan-selection');
+              showMobileAddonSessionDialog(context);
             },
             child: Text(
               translate("Add Connection"),

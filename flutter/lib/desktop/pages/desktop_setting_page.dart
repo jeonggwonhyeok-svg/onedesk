@@ -1447,7 +1447,7 @@ class _SafetyState extends State<_Safety> with AutomaticKeepAliveClientMixin {
         _OptionCheckBox(context, 'allow-only-conn-window-open-tip',
             'allow-only-conn-window-open',
             reverse: false, enabled: enabled),
-      if (bind.mainIsInstalled()) unlockPin()
+      // if (bind.mainIsInstalled()) unlockPin()
     ]);
   }
 
@@ -1583,15 +1583,6 @@ class _SafetyState extends State<_Safety> with AutomaticKeepAliveClientMixin {
                       enabled: isEnabled,
                       accentColor: _accentColor,
                     ).marginOnly(right: 5),
-                    Offstage(
-                      offstage: !hasWhitelist.value,
-                      child: MouseRegion(
-                        child: const Icon(Icons.warning_amber_rounded,
-                                color: Color.fromARGB(255, 255, 204, 0))
-                            .marginOnly(right: 5),
-                        cursor: SystemMouseCursors.click,
-                      ),
-                    ),
                     Expanded(
                         child: Text(
                       translate('Use IP Whitelisting'),

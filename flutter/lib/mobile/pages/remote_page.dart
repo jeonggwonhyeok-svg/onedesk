@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io' show Platform;
 import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
@@ -523,8 +524,6 @@ class _RemotePageState extends State<RemotePage> with WidgetsBindingObserver {
   Widget build(BuildContext context) {
     final keyboardIsVisible =
         keyboardVisibilityController.isVisible && _showEdit;
-    final showDismissFab = keyboardIsVisible || _showGestureHelp;
-
     return WillPopScope(
       onWillPop: () async {
         clientClose(sessionId, gFFI);
@@ -535,40 +534,37 @@ class _RemotePageState extends State<RemotePage> with WidgetsBindingObserver {
           floatingActionButtonLocation: keyboardIsVisible
               ? FABLocation(FloatingActionButtonLocation.endFloat, 0, -35)
               : null,
-          floatingActionButton: !showDismissFab
+          floatingActionButton: !keyboardIsVisible
               ? null
               : FloatingActionButton(
-                  mini: !keyboardIsVisible,
+                  mini: false,
                   child: Icon(Icons.expand_more, color: Colors.white),
                   backgroundColor: MyTheme.accent,
                   onPressed: () {
                     setState(() {
-                      if (keyboardIsVisible) {
-                        _showEdit = false;
-                        gFFI.invokeMethod("enable_soft_keyboard", false);
-                        _mobileFocusNode.unfocus();
-                        _physicalFocusNode.requestFocus();
-                      } else if (_showGestureHelp) {
-                        _showGestureHelp = false;
-                      }
+                      _showEdit = false;
+                      gFFI.invokeMethod("enable_soft_keyboard", false);
+                      _mobileFocusNode.unfocus();
+                      _physicalFocusNode.requestFocus();
                     });
                   }),
-          bottomNavigationBar: Obx(() => Stack(
-                alignment: Alignment.bottomCenter,
-                children: [
-                  gFFI.ffiModel.pi.isSet.isTrue &&
-                          gFFI.ffiModel.waitForFirstImage.isTrue
-                      ? emptyOverlay(MyTheme.canvasColor)
-                      : () {
-                          gFFI.ffiModel.tryShowAndroidActionsOverlay();
-                          return Offstage();
-                        }(),
-                  _bottomWidget(),
-                  gFFI.ffiModel.pi.isSet.isFalse
-                      ? emptyOverlay(MyTheme.canvasColor)
-                      : Offstage(),
-                ],
-              )),
+          bottomNavigationBar: _showGestureHelp
+              ? null
+              : Obx(() => Stack(
+                    alignment: Alignment.bottomCenter,
+                    children: [
+                      gFFI.ffiModel.pi.isSet.isTrue &&
+                              gFFI.ffiModel.waitForFirstImage.isTrue
+                          ? emptyOverlay(MyTheme.canvasColor)
+                          : () {
+                              gFFI.ffiModel.tryShowAndroidActionsOverlay();
+                              return Offstage();
+                            }(),
+                      gFFI.ffiModel.pi.isSet.isFalse
+                          ? emptyOverlay(MyTheme.canvasColor)
+                          : Offstage(),
+                    ],
+                  )),
           body: Obx(() {
             // Access Rx values here so Obx reacts to their changes
             final isPhysicalMouse = inputModel.isPhysicalMouse.value;
@@ -622,6 +618,14 @@ class _RemotePageState extends State<RemotePage> with WidgetsBindingObserver {
                   // Mini button (Positioned - direct Stack child)
                   if (showToolbar && !_showBar.value && !kbVisible)
                     _buildMiniButton(isPortrait),
+                  // Gesture help overlay
+                  if (_showGestureHelp)
+                    Positioned(
+                      left: 0,
+                      right: 0,
+                      bottom: 0,
+                      child: getGestureHelp(),
+                    ),
                 ],
               ),
             );
@@ -652,8 +656,7 @@ class _RemotePageState extends State<RemotePage> with WidgetsBindingObserver {
     return Positioned(
       left: 0,
       right: 0,
-      top: isPortrait ? 8 : null,
-      bottom: isPortrait ? null : 8,
+      bottom: 30,
       child: Center(
         child: ListenableBuilder(
           listenable: gFFI.recordingModel,
@@ -687,7 +690,7 @@ class _RemotePageState extends State<RemotePage> with WidgetsBindingObserver {
     // Communication popup items
     final commItems = <SimpleMenuItem>[
       SimpleMenuItem('Chat', () => onPressedTextChat(widget.id)),
-      if (!isWeb)
+      if (!isWeb && !Platform.isIOS)
         SimpleMenuItem(
           (isInVoiceCall || isWaitingVoiceCall)
               ? 'End Voice Call'
@@ -737,13 +740,14 @@ class _RemotePageState extends State<RemotePage> with WidgetsBindingObserver {
         items: fileItems,
         isPortrait: isPortrait,
       ),
-      // Recording/Screenshot (popup)
-      toolbarPopupButton(
-        asset: 'assets/icons/remote_screen.svg',
-        label: 'Recording',
-        items: recordItems,
-        isPortrait: isPortrait,
-      ),
+      // Recording/Screenshot (popup) - iOS에서는 불가능하므로 숨김
+      if (!Platform.isIOS)
+        toolbarPopupButton(
+          asset: 'assets/icons/remote_screen.svg',
+          label: 'Recording',
+          items: recordItems,
+          isPortrait: isPortrait,
+        ),
       // Communication (popup)
       toolbarPopupButton(
         asset: 'assets/icons/remote_group.svg',
@@ -775,12 +779,14 @@ class _RemotePageState extends State<RemotePage> with WidgetsBindingObserver {
                 gFFI.ffiModel.toggleTouchMode();
                 bind.mainSetLocalOption(key: kOptionTouchMode, value: 'N');
               }
+              setState(() => _showGestureHelp = true);
             }),
             SimpleMenuItem('Touch mode', () {
               if (!gFFI.ffiModel.touchMode) {
                 gFFI.ffiModel.toggleTouchMode();
                 bind.mainSetLocalOption(key: kOptionTouchMode, value: 'Y');
               }
+              setState(() => _showGestureHelp = true);
             }),
           ],
           isPortrait: isPortrait,
@@ -860,7 +866,7 @@ class _RemotePageState extends State<RemotePage> with WidgetsBindingObserver {
             ),
           ),
           // Recording card
-          if (isRecording) ...[
+          if (isRecording && !Platform.isIOS) ...[
             const SizedBox(width: 6),
             _buildRecordingBox(),
           ],
@@ -894,7 +900,7 @@ class _RemotePageState extends State<RemotePage> with WidgetsBindingObserver {
           ),
         ),
         // Recording box (when recording)
-        if (isRecording) ...[
+        if (isRecording && !Platform.isIOS) ...[
           const SizedBox(height: 6),
           _buildRecordingBox(),
         ],
@@ -956,8 +962,7 @@ class _RemotePageState extends State<RemotePage> with WidgetsBindingObserver {
   Widget _buildMiniButton(bool isPortrait) {
     return Positioned(
       left: 0,
-      top: isPortrait ? 8 : null,
-      bottom: isPortrait ? null : 8,
+      bottom: 30,
       child: miniShowButton(onTap: () => _showBar.value = true),
     );
   }
@@ -1244,20 +1249,33 @@ class _RemotePageState extends State<RemotePage> with WidgetsBindingObserver {
   }
 
   /// aka changeTouchMode
-  BottomAppBar getGestureHelp() {
-    return BottomAppBar(
-        child: SingleChildScrollView(
-            controller: ScrollController(),
-            padding: EdgeInsets.symmetric(vertical: 10),
-            child: GestureHelp(
-              touchMode: gFFI.ffiModel.touchMode,
-              onTouchModeChange: (t) {
-                gFFI.ffiModel.toggleTouchMode();
-                final v = gFFI.ffiModel.touchMode ? 'Y' : 'N';
-                bind.mainSetLocalOption(key: kOptionTouchMode, value: v);
-              },
-              virtualMouseMode: gFFI.ffiModel.virtualMouseMode,
-            )));
+  Widget getGestureHelp() {
+    return Material(
+      color: Colors.white,
+      borderRadius: const BorderRadius.only(
+        topLeft: Radius.circular(16),
+        topRight: Radius.circular(16),
+      ),
+      clipBehavior: Clip.antiAlias,
+      elevation: 8,
+      child: SingleChildScrollView(
+          controller: ScrollController(),
+          padding: EdgeInsets.symmetric(vertical: 10),
+          child: GestureHelp(
+            touchMode: gFFI.ffiModel.touchMode,
+            onTouchModeChange: (t) {
+              gFFI.ffiModel.toggleTouchMode();
+              final v = gFFI.ffiModel.touchMode ? 'Y' : 'N';
+              bind.mainSetLocalOption(key: kOptionTouchMode, value: v);
+            },
+            virtualMouseMode: gFFI.ffiModel.virtualMouseMode,
+            onClose: () {
+              setState(() {
+                _showGestureHelp = false;
+              });
+            },
+          )),
+    );
   }
 
   // * Currently mobile does not enable map mode
@@ -1304,23 +1322,28 @@ class _KeyHelpToolsState extends State<KeyHelpTools> {
   InputModel get inputModel => gFFI.inputModel;
 
   Widget wrap(String text, void Function() onPressed,
-      {bool? active, IconData? icon}) {
+      {bool? active, IconData? icon, String? svgIcon}) {
+    final Widget child;
+    if (svgIcon != null) {
+      child = SvgPicture.asset(svgIcon, width: 17, height: 17,
+          colorFilter: ColorFilter.mode(Colors.white, BlendMode.srcIn));
+    } else if (icon != null) {
+      child = Icon(icon, size: 17, color: Colors.white);
+    } else {
+      child = Text(text,
+          style: TextStyle(color: Colors.white, fontSize: 13));
+    }
     return TextButton(
         style: TextButton.styleFrom(
           minimumSize: Size(0, 0),
           padding: EdgeInsets.symmetric(vertical: 10, horizontal: 9.75),
-          //adds padding inside the button
           tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-          //limits the touch area to the button area
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(5.0),
           ),
           backgroundColor: active == true ? MyTheme.accent80 : null,
         ),
-        child: icon != null
-            ? Icon(icon, size: 14, color: Colors.white)
-            : Text(translate(text),
-                style: TextStyle(color: Colors.white, fontSize: 11)),
+        child: child,
         onPressed: onPressed);
   }
 
@@ -1388,9 +1411,9 @@ class _KeyHelpToolsState extends State<KeyHelpTools> {
                 () => _pin = !_pin,
               ),
           active: _pin,
-          icon: Icons.push_pin),
+          svgIcon: 'assets/icons/keyboard-tool-pin.svg'),
       wrap(
-          ' ... ',
+          '',
           () => setState(
                 () {
                   _more = !_more;
@@ -1399,7 +1422,8 @@ class _KeyHelpToolsState extends State<KeyHelpTools> {
                   }
                 },
               ),
-          active: _more),
+          active: _more,
+          icon: _more ? Icons.keyboard_arrow_up : Icons.keyboard_arrow_down),
     ];
     final fn = <Widget>[
       SizedBox(width: 9999),
@@ -1486,19 +1510,24 @@ class _KeyHelpToolsState extends State<KeyHelpTools> {
     Future.delayed(Duration(milliseconds: 500), () {
       _updateRect();
     });
-    return Container(
+    return ClipRRect(
         key: _key,
-        color: Color(0xAA000000),
-        padding: EdgeInsets.only(
-            top: _keyboardVisibilityController.isVisible ? 24 : 4, bottom: 8),
-        child: Wrap(
-          spacing: space,
-          runSpacing: space,
-          children: <Widget>[SizedBox(width: 9999)] +
-              modifiers +
-              keys +
-              (_fn ? fn : []) +
-              (_more ? more : []),
+        child: BackdropFilter(
+          filter: ui.ImageFilter.blur(sigmaX: 20, sigmaY: 20),
+          child: Container(
+            color: Colors.black.withValues(alpha: 0.3),
+            padding: EdgeInsets.only(
+                top: _keyboardVisibilityController.isVisible ? 24 : 4, bottom: 8),
+            child: Wrap(
+              spacing: space,
+              runSpacing: space,
+              children: <Widget>[SizedBox(width: 9999)] +
+                  modifiers +
+                  keys +
+                  (_fn ? fn : []) +
+                  (_more ? more : []),
+            ),
+          ),
         ));
   }
 }
@@ -1734,76 +1763,122 @@ class _MobileDisplaySettingsPageState extends State<MobileDisplaySettingsPage> {
             fontWeight: FontWeight.w600,
           ),
         ),
-        centerTitle: true,
+        centerTitle: false,
+        titleSpacing: 0,
       ),
       body: _loaded
-          ? SingleChildScrollView(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-              child: Obx(() => Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  _buildDisplaySelector(),
-                  if (_viewStyleRadios.isNotEmpty)
-                    _buildDropdownCard(
-                      title: translate('Default View Style'),
-                      value: _viewStyle.value,
-                      items: _viewStyleRadios,
-                      onChanged: (v) {
-                        final item = _viewStyleRadios
-                            .firstWhereOrNull((e) => e.value == v);
-                        if (item != null) {
-                          item.onChanged?.call(v);
-                          _viewStyle.value = v;
-                          bind.mainSetUserDefaultOption(
-                              key: kOptionViewStyle, value: v);
-                        }
-                      },
-                    ),
-                  if (_imageQualityRadios.isNotEmpty)
-                    _buildDropdownCard(
-                      title: translate('Default Image Quality'),
-                      value: _imageQuality.value,
-                      items: _imageQualityRadios,
-                      onChanged: (v) {
-                        final item = _imageQualityRadios
-                            .firstWhereOrNull((e) => e.value == v);
-                        if (item != null) {
-                          item.onChanged?.call(v);
-                          _imageQuality.value = v;
-                          bind.mainSetUserDefaultOption(
-                              key: kOptionImageQuality, value: v);
-                        }
-                      },
-                    ),
-                  if (_codecRadios.isNotEmpty)
-                    _buildDropdownCard(
-                      title: translate('Default Codec'),
-                      value: _codec.value,
-                      items: _codecRadios,
-                      onChanged: (v) {
-                        final item = _codecRadios
-                            .firstWhereOrNull((e) => e.value == v);
-                        if (item != null) {
-                          item.onChanged?.call(v);
-                          _codec.value = v;
-                          bind.mainSetUserDefaultOption(
-                              key: kOptionCodecPreference, value: v);
-                        }
-                      },
-                    ),
-                  _buildResolutionDropdown(),
-                  if (_cursorToggles.isNotEmpty || _displayToggles.isNotEmpty)
-                    _buildToggleCard(
-                      translate('Display'),
-                      [
-                        ..._buildToggles(_cursorToggles),
-                        ..._buildToggles(_displayToggles),
+          ? Column(
+              children: [
+                Expanded(
+                  child: SingleChildScrollView(
+                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                    child: Obx(() => Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        _buildDisplaySelector(),
+                        if (_viewStyleRadios.isNotEmpty)
+                          _buildDropdownCard(
+                            title: translate('Default View Style'),
+                            value: _viewStyle.value,
+                            items: _viewStyleRadios,
+                            onChanged: (v) {
+                              final item = _viewStyleRadios
+                                  .firstWhereOrNull((e) => e.value == v);
+                              if (item != null) {
+                                item.onChanged?.call(v);
+                                _viewStyle.value = v;
+                                bind.mainSetUserDefaultOption(
+                                    key: kOptionViewStyle, value: v);
+                              }
+                            },
+                          ),
+                        if (_imageQualityRadios.isNotEmpty)
+                          _buildDropdownCard(
+                            title: translate('Default Image Quality'),
+                            value: _imageQuality.value,
+                            items: _imageQualityRadios,
+                            onChanged: (v) {
+                              final item = _imageQualityRadios
+                                  .firstWhereOrNull((e) => e.value == v);
+                              if (item != null) {
+                                item.onChanged?.call(v);
+                                _imageQuality.value = v;
+                                bind.mainSetUserDefaultOption(
+                                    key: kOptionImageQuality, value: v);
+                              }
+                            },
+                          ),
+                        if (_codecRadios.isNotEmpty)
+                          _buildDropdownCard(
+                            title: translate('Default Codec'),
+                            value: _codec.value,
+                            items: _codecRadios,
+                            onChanged: (v) {
+                              final item = _codecRadios
+                                  .firstWhereOrNull((e) => e.value == v);
+                              if (item != null) {
+                                item.onChanged?.call(v);
+                                _codec.value = v;
+                                bind.mainSetUserDefaultOption(
+                                    key: kOptionCodecPreference, value: v);
+                              }
+                            },
+                          ),
+                        _buildResolutionDropdown(),
+                        if (_cursorToggles.isNotEmpty || _displayToggles.isNotEmpty)
+                          _buildToggleCard(
+                            translate('Display'),
+                            [
+                              ..._buildToggles(_cursorToggles),
+                              ..._buildToggles(_displayToggles),
+                            ],
+                          ),
+                        _buildPrivacyMode(),
+                        const SizedBox(height: 16),
                       ],
+                    )),
+                  ),
+                ),
+                // 하단 고정 닫기 버튼
+                Container(
+                  padding: const EdgeInsets.all(16),
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withValues(alpha: 0.05),
+                        blurRadius: 10,
+                        offset: const Offset(0, -2),
+                      ),
+                    ],
+                  ),
+                  child: SafeArea(
+                    top: false,
+                    child: SizedBox(
+                      width: double.infinity,
+                      child: ElevatedButton(
+                        onPressed: () => Navigator.of(context).pop(),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: const Color(0xFF5B7BF8),
+                          foregroundColor: Colors.white,
+                          elevation: 0,
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          padding: const EdgeInsets.symmetric(vertical: 14),
+                        ),
+                        child: Text(
+                          translate('Close'),
+                          style: const TextStyle(
+                            fontSize: 15,
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                      ),
                     ),
-                  _buildPrivacyMode(),
-                  const SizedBox(height: 24),
-                ],
-              )),
+                  ),
+                ),
+              ],
             )
           : const Center(child: CircularProgressIndicator()),
     );

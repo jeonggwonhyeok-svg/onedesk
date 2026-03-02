@@ -170,13 +170,15 @@ class FileModel {
   Future<bool?> showFileConfirmDialog(
       String title, String content, bool showCheckbox, bool isIdentical) async {
     fileConfirmCheckboxRemember = false;
+    // true = overwrite, null = skip
+    bool _overwriteSelected = true;
     return await parent.target?.dialogManager.show<bool?>(
         (setState, Function(bool? v) close, context) {
       cancel() => close(false);
-      submit() => close(true);
+      submit() => close(_overwriteSelected ? true : null);
       return CustomAlertDialog(
         title: Text(
-          title,
+          translate("file name exists"),
           style: MyTheme.dialogTitleStyle,
         ),
         contentBoxConstraints:
@@ -185,10 +187,13 @@ class FileModel {
             crossAxisAlignment: CrossAxisAlignment.start,
             mainAxisSize: MainAxisSize.min,
             children: [
-              Text(translate("This file exists, skip or overwrite this file?"),
+              Text(translate("This file exists"),
                   style: const TextStyle(fontWeight: FontWeight.bold)),
-              const SizedBox(height: 5),
-              Text(content),
+              const SizedBox(height: 8),
+              Text(
+                '${translate("file name")} : $content',
+                style: const TextStyle(color: Color(0xFF8F8E95), fontSize: 13),
+              ),
               Offstage(
                 offstage: !isIdentical,
                 child: Column(
@@ -200,24 +205,61 @@ class FileModel {
                   ],
                 ),
               ),
+              const SizedBox(height: 16),
+              // 덮어쓰기 라디오
+              GestureDetector(
+                onTap: () => setState(() => _overwriteSelected = true),
+                child: Row(
+                  children: [
+                    StyledRadio<bool>(
+                      value: true,
+                      groupValue: _overwriteSelected,
+                      onChanged: (v) => setState(() => _overwriteSelected = true),
+                    ),
+                    const SizedBox(width: 8),
+                    Text(translate("overwrite this file")),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 8),
+              // 건너뛰기 라디오
+              GestureDetector(
+                onTap: () => setState(() => _overwriteSelected = false),
+                child: Row(
+                  children: [
+                    StyledRadio<bool>(
+                      value: false,
+                      groupValue: _overwriteSelected,
+                      onChanged: (v) => setState(() => _overwriteSelected = false),
+                    ),
+                    const SizedBox(width: 8),
+                    Text(translate("skip this file")),
+                  ],
+                ),
+              ),
               showCheckbox
-                  ? GestureDetector(
-                      onTap: () {
-                        setState(() => fileConfirmCheckboxRemember = !fileConfirmCheckboxRemember);
-                      },
-                      child: Row(
-                        children: [
-                          StyledCheckbox(
-                            value: fileConfirmCheckboxRemember,
-                            onChanged: (v) {
-                              if (v == null) return;
-                              setState(() => fileConfirmCheckboxRemember = v);
-                            },
+                  ? Column(
+                      children: [
+                        const SizedBox(height: 16),
+                        GestureDetector(
+                          onTap: () {
+                            setState(() => fileConfirmCheckboxRemember = !fileConfirmCheckboxRemember);
+                          },
+                          child: Row(
+                            children: [
+                              StyledCheckbox(
+                                value: fileConfirmCheckboxRemember,
+                                onChanged: (v) {
+                                  if (v == null) return;
+                                  setState(() => fileConfirmCheckboxRemember = v);
+                                },
+                              ),
+                              const SizedBox(width: 8),
+                              Text(translate("Do this for all conflicts")),
+                            ],
                           ),
-                          const SizedBox(width: 8),
-                          Text(translate("Do this for all conflicts")),
-                        ],
-                      ),
+                        ),
+                      ],
                     )
                   : const SizedBox.shrink()
             ]),
@@ -225,24 +267,12 @@ class FileModel {
           Row(
             children: [
               Expanded(
-                child: StyledOutlinedButton(
-                  label: translate("Cancel"),
-                  onPressed: cancel,
-                ),
+                child: dialogButton("Cancel",
+                    onPressed: cancel, isOutline: true),
               ),
               const SizedBox(width: 12),
               Expanded(
-                child: StyledOutlinedButton(
-                  label: translate("Skip"),
-                  onPressed: () => close(null),
-                ),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: StyledPrimaryButton(
-                  label: translate("OK"),
-                  onPressed: submit,
-                ),
+                child: dialogButton("OK", onPressed: submit),
               ),
             ],
           ),

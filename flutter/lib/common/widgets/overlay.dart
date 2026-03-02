@@ -37,10 +37,13 @@ class DraggableChatWindow extends StatelessWidget {
             chatModel: chatModel,
             width: width,
             height: height,
-            builder: (context) {
+            builder: (context, onPanUpdate) {
               return Column(
                 children: [
-                  _buildMobileAppBar(context),
+                  GestureDetector(
+                    onPanUpdate: onPanUpdate,
+                    child: _buildDesktopAppBar(context),
+                  ),
                   Expanded(
                     child: ChatPage(chatModel: chatModel),
                   ),
@@ -63,9 +66,7 @@ class DraggableChatWindow extends StatelessWidget {
                 resizeToAvoidBottomInset: false,
                 appBar: CustomAppBar(
                   onPanUpdate: onPanUpdate,
-                  appBar: (isDesktop || isWebDesktop)
-                      ? _buildDesktopAppBar(context)
-                      : _buildMobileAppBar(context),
+                  appBar: _buildDesktopAppBar(context),
                 ),
                 body: ChatPage(chatModel: chatModel),
               );
@@ -600,7 +601,7 @@ class IOSDraggable extends StatefulWidget {
   final ChatModel? chatModel;
   final double width;
   final double height;
-  final Widget Function(BuildContext) builder;
+  final Widget Function(BuildContext, GestureDragUpdateCallback) builder;
 
   @override
   IOSDraggableState createState() =>
@@ -669,20 +670,22 @@ class IOSDraggableState extends State<IOSDraggable> {
         Positioned(
           left: position.pos.dx,
           top: position.pos.dy,
-          child: GestureDetector(
-            onPanUpdate: (details) {
-              setState(() {
-                position.update(position.pos + details.delta);
-              });
-              _chatModel?.setChatWindowPosition(position.pos);
-            },
-            child: Material(
-              child: Container(
-                width: _width,
-                height: _height,
-                decoration:
-                    BoxDecoration(border: Border.all(color: MyTheme.border)),
-                child: widget.builder(context),
+          child: Material(
+            child: Container(
+              width: _width,
+              height: _height,
+              decoration: BoxDecoration(
+                border: Border.all(color: MyTheme.border),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(8),
+                child: widget.builder(context, (details) {
+                  setState(() {
+                    position.update(position.pos + details.delta);
+                  });
+                  _chatModel?.setChatWindowPosition(position.pos);
+                }),
               ),
             ),
           ),

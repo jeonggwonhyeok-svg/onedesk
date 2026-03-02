@@ -1,10 +1,14 @@
 import 'dart:async';
+import 'dart:io' show Platform, File;
 
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:flutter_hbb/models/file_model.dart';
 import 'package:flutter_hbb/models/model.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 import 'package:get/get.dart';
+import 'package:path/path.dart' as p;
 import 'package:wakelock_plus/wakelock_plus.dart';
 
 import '../../common.dart';
@@ -154,9 +158,24 @@ class _FileManagerPageState extends State<FileManagerPage> {
               children: [
                 TextFormField(
                   decoration: InputDecoration(
-                    labelText: translate("Please enter the folder name"),
+                    hintText: translate("Please enter the folder name"),
+                    hintStyle: const TextStyle(color: Color(0xFFB9B8BF), fontSize: 14),
                     errorText: errorText,
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(8),
+                      borderSide: const BorderSide(color: Color(0xFFDEDEE2)),
+                    ),
+                    enabledBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(8),
+                      borderSide: const BorderSide(color: Color(0xFFDEDEE2)),
+                    ),
+                    focusedBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(8),
+                      borderSide: const BorderSide(color: Color(0xFF5F71FF)),
+                    ),
+                    contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 20),
                   ),
+                  style: const TextStyle(fontSize: 14, color: Color(0xFF454447)),
                   controller: name,
                 ).workaroundFreezeLinuxMint(),
               ],
@@ -267,6 +286,191 @@ class _FileManagerPageState extends State<FileManagerPage> {
     );
   }
 
+  // iOS 로컬 파일: 선택한 파일 목록 + 파일 피커 버튼
+  final RxList<PlatformFile> _iosPickedFiles = <PlatformFile>[].obs;
+
+  Widget _buildiOSLocalFileView() {
+    return Obx(() {
+      final files = _iosPickedFiles;
+      return Column(
+        children: [
+          // 파일/사진 추가 버튼
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+            child: Row(
+              children: [
+                Expanded(
+                  child: SizedBox(
+                    height: 48,
+                    child: ElevatedButton.icon(
+                      onPressed: _pickFilesForIOS,
+                      icon: const Icon(Icons.insert_drive_file, size: 20),
+                      label: Text(
+                        translate('Select files'),
+                        style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
+                      ),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: const Color(0xFF5F71FF),
+                        foregroundColor: Colors.white,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        elevation: 0,
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: SizedBox(
+                    height: 48,
+                    child: ElevatedButton.icon(
+                      onPressed: _pickPhotosForIOS,
+                      icon: const Icon(Icons.photo_library, size: 20),
+                      label: Text(
+                        translate('Select photos'),
+                        style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
+                      ),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: const Color(0xFF5F71FF),
+                        foregroundColor: Colors.white,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        elevation: 0,
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          // 선택된 파일 목록
+          Expanded(
+            child: files.isEmpty
+                ? Center(
+                    child: Text(
+                      translate('Select files to send'),
+                      style: const TextStyle(
+                        color: Color(0xFF999999),
+                        fontSize: 15,
+                      ),
+                    ),
+                  )
+                : ListView.builder(
+                    itemCount: files.length,
+                    itemBuilder: (context, index) {
+                      final file = files[index];
+                      return ListTile(
+                        leading: const Icon(Icons.insert_drive_file,
+                            color: Color(0xFF5F71FF)),
+                        title: Text(
+                          file.name,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                        subtitle: Text(_formatFileSize(file.size)),
+                        trailing: IconButton(
+                          icon: const Icon(Icons.close, size: 20),
+                          onPressed: () => _iosPickedFiles.removeAt(index),
+                        ),
+                      );
+                    },
+                  ),
+          ),
+          // 전송 버튼
+          if (files.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
+              child: SizedBox(
+                width: double.infinity,
+                height: 48,
+                child: ElevatedButton(
+                  onPressed: _sendIOSPickedFiles,
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: const Color(0xFF5F71FF),
+                    foregroundColor: Colors.white,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    elevation: 0,
+                  ),
+                  child: Text(
+                    '${translate("Send")} (${files.length})',
+                    style: const TextStyle(
+                        fontSize: 16, fontWeight: FontWeight.w600),
+                  ),
+                ),
+              ),
+            ),
+        ],
+      );
+    });
+  }
+
+  Future<void> _pickFilesForIOS() async {
+    final result = await FilePicker.platform.pickFiles(
+      allowMultiple: true,
+      withData: false,
+      withReadStream: false,
+    );
+    if (result != null && result.files.isNotEmpty) {
+      _iosPickedFiles.addAll(result.files);
+    }
+  }
+
+  Future<void> _pickPhotosForIOS() async {
+    final picker = ImagePicker();
+    final images = await picker.pickMultiImage();
+    if (images.isNotEmpty) {
+      for (final xfile in images) {
+        final file = File(xfile.path);
+        final stat = await file.stat();
+        _iosPickedFiles.add(PlatformFile(
+          name: xfile.name,
+          path: xfile.path,
+          size: stat.size,
+        ));
+      }
+    }
+  }
+
+  Future<void> _sendIOSPickedFiles() async {
+    final localDir = model.localController.directory.value.path;
+    for (final file in _iosPickedFiles) {
+      if (file.path == null) continue;
+      // 샌드박스로 복사
+      final srcFile = File(file.path!);
+      final destPath = p.join(localDir, file.name);
+      await srcFile.copy(destPath);
+    }
+    // 로컬 디렉토리 새로고침
+    model.localController.refresh();
+    await Future.delayed(const Duration(milliseconds: 500));
+    // 복사된 파일들을 선택 상태로 설정
+    final localController = model.localController;
+    final entries = localController.directory.value.entries;
+    final pickedNames = _iosPickedFiles.map((f) => f.name).toSet();
+    localController.selectedItems.clear();
+    for (final entry in entries) {
+      if (pickedNames.contains(entry.name)) {
+        localController.selectedItems.add(entry);
+      }
+    }
+    _iosPickedFiles.clear();
+    // 다중 선택 모드 활성화 후 리모트 탭으로 전환 (기존 흐름)
+    selectMode.value = SelectMode.local;
+    setState(() => showLocal = false);
+  }
+
+  String _formatFileSize(int bytes) {
+    if (bytes < 1024) return '$bytes B';
+    if (bytes < 1024 * 1024) return '${(bytes / 1024).toStringAsFixed(1)} KB';
+    if (bytes < 1024 * 1024 * 1024) {
+      return '${(bytes / (1024 * 1024)).toStringAsFixed(1)} MB';
+    }
+    return '${(bytes / (1024 * 1024 * 1024)).toStringAsFixed(1)} GB';
+  }
+
   @override
   Widget build(BuildContext context) => WillPopScope(
       onWillPop: () async {
@@ -302,7 +506,8 @@ class _FileManagerPageState extends State<FileManagerPage> {
               fontWeight: FontWeight.w600,
             ),
           ),
-          centerTitle: true,
+          centerTitle: false,
+          titleSpacing: 0,
           actions: [
             PopupMenuButton<String>(
               tooltip: "",
@@ -349,11 +554,13 @@ class _FileManagerPageState extends State<FileManagerPage> {
             _buildTabBar(),
             Expanded(
               child: showLocal
-                  ? FileManagerView(
-                      controller: model.localController,
-                      selectMode: selectMode,
-                      ffi: _ffi,
-                    )
+                  ? (Platform.isIOS
+                      ? _buildiOSLocalFileView()
+                      : FileManagerView(
+                          controller: model.localController,
+                          selectMode: selectMode,
+                          ffi: _ffi,
+                        ))
                   : FileManagerView(
                       controller: model.remoteController,
                       selectMode: selectMode,
@@ -378,7 +585,16 @@ class _FileManagerPageState extends State<FileManagerPage> {
           // 같은 쪽에서 선택 중: 보내기/받기 버튼
           final hasItems = selectedItems != null && selectedItems.items.isNotEmpty;
           return Container(
-            color: const Color(0xFFFEFEFE),
+            decoration: const BoxDecoration(
+              color: Color(0xFFFEFEFE),
+              boxShadow: [
+                BoxShadow(
+                  color: Color(0x1A000000),
+                  blurRadius: 10,
+                  offset: Offset(0, -2),
+                ),
+              ],
+            ),
             padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
             child: SizedBox(
               width: double.infinity,
@@ -417,7 +633,16 @@ class _FileManagerPageState extends State<FileManagerPage> {
               ? pathParts.where((p) => p.isNotEmpty).lastOrNull ?? currentDir.path
               : currentDir.path;
           return Container(
-            color: const Color(0xFFFEFEFE),
+            decoration: const BoxDecoration(
+              color: Color(0xFFFEFEFE),
+              boxShadow: [
+                BoxShadow(
+                  color: Color(0x1A000000),
+                  blurRadius: 10,
+                  offset: Offset(0, -2),
+                ),
+              ],
+            ),
             padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
             child: Column(
               mainAxisSize: MainAxisSize.min,
@@ -568,7 +793,7 @@ class _FileManagerPageState extends State<FileManagerPage> {
                     ),
                     child: Row(
                       children: [
-                        // 파일/폴더 아이콘 카드
+                        // 파일/폴더 아이콘 카드 (삭제 작업일 때 삭제 아이콘)
                         Container(
                           width: 40,
                           height: 40,
@@ -578,9 +803,11 @@ class _FileManagerPageState extends State<FileManagerPage> {
                           ),
                           child: Center(
                             child: SvgPicture.asset(
-                              isFile
-                                  ? 'assets/icons/mobile-file-sender-file.svg'
-                                  : 'assets/icons/mobile-file-sender-folder.svg',
+                              (job.type == JobType.deleteFile || job.type == JobType.deleteDir)
+                                  ? 'assets/icons/mobile-file-sender-del.svg'
+                                  : isFile
+                                      ? 'assets/icons/mobile-file-sender-file.svg'
+                                      : 'assets/icons/mobile-file-sender-folder.svg',
                               width: 20,
                               height: 20,
                               colorFilter: const ColorFilter.mode(
@@ -805,8 +1032,8 @@ class _FileManagerViewState extends State<FileManagerView> {
                 ? readableFileSize(entries[index].size.toDouble())
                 : "";
 
-            // 교차 배경: 짝수 #EFF1FF, 홀수 투명
-            final hasBackground = index % 2 == 0;
+            // 교차 배경: 다중선택 모드일 때만 짝수 #EFF1FF / 홀수 투명
+            final hasBackground = widget.selectMode.value != SelectMode.none && index % 2 == 0;
 
             return GestureDetector(
               onTap: () {

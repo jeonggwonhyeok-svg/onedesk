@@ -22,6 +22,7 @@ import 'package:flutter_hbb/utils/multi_window_manager.dart';
 import 'package:flutter_hbb/utils/platform_channel.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 import 'package:get/get.dart';
+import 'package:google_fonts/google_fonts.dart';
 import 'package:get/get_rx/src/rx_workers/utils/debouncer.dart';
 import 'package:provider/provider.dart';
 import 'package:uni_links/uni_links.dart';
@@ -842,6 +843,13 @@ class SettingTabTheme extends ThemeExtension<SettingTabTheme> {
 class MyTheme {
   MyTheme._();
 
+  static final String? _notoSansFont = GoogleFonts.notoSans().fontFamily;
+  static final List<String> _notoSansFallback = [
+    GoogleFonts.notoSansKr().fontFamily!,
+    GoogleFonts.notoSansJp().fontFamily!,
+    GoogleFonts.notoSansSc().fontFamily!,
+  ];
+
   static const Color grayBg = Color(0xFFEFEFF2);
   static const Color accent = Color(0xFF0071FF);
   static const Color accent50 = Color(0x770071FF);
@@ -972,6 +980,7 @@ class MyTheme {
   static ThemeData lightTheme = ThemeData(
     // https://stackoverflow.com/questions/77537315/after-upgrading-to-flutter-3-16-the-app-bar-background-color-button-size-and
     useMaterial3: false,
+    fontFamily: _notoSansFont,
     brightness: Brightness.light,
     hoverColor: Color.fromARGB(255, 224, 224, 224),
     scaffoldBackgroundColor: Colors.white,
@@ -1011,16 +1020,21 @@ class MyTheme {
             ),
           )
         : null,
-    textTheme: const TextTheme(
+    textTheme: TextTheme(
         titleLarge: TextStyle(
             fontSize: 20,
             color: Color(0xFF111827),
-            fontWeight: FontWeight.w600),
-        titleSmall: TextStyle(fontSize: 18, color: Colors.black87),
-        bodySmall: TextStyle(fontSize: 14, color: Colors.black87, height: 1.25),
+            fontWeight: FontWeight.w600,
+            fontFamilyFallback: _notoSansFallback),
+        titleSmall: TextStyle(fontSize: 18, color: Colors.black87,
+            fontFamilyFallback: _notoSansFallback),
+        bodySmall: TextStyle(fontSize: 14, color: Colors.black87, height: 1.25,
+            fontFamilyFallback: _notoSansFallback),
         bodyMedium:
-            TextStyle(fontSize: 16, color: Colors.black87, height: 1.25),
-        labelLarge: TextStyle(fontSize: 16.0, color: MyTheme.accent80)),
+            TextStyle(fontSize: 16, color: Colors.black87, height: 1.25,
+            fontFamilyFallback: _notoSansFallback),
+        labelLarge: TextStyle(fontSize: 16.0, color: MyTheme.accent80,
+            fontFamilyFallback: _notoSansFallback)),
     cardColor: grayBg,
     hintColor: Color(0xFFAAAAAA),
     visualDensity: VisualDensity.adaptivePlatformDensity,
@@ -1101,6 +1115,7 @@ class MyTheme {
   );
   static ThemeData darkTheme = ThemeData(
     useMaterial3: false,
+    fontFamily: _notoSansFont,
     brightness: Brightness.dark,
     hoverColor: Color.fromARGB(255, 45, 46, 53),
     scaffoldBackgroundColor: Color(0xFF18191E),
@@ -1129,15 +1144,20 @@ class MyTheme {
             ),
           )
         : null,
-    textTheme: const TextTheme(
-      titleLarge: TextStyle(fontSize: 20),
-      titleSmall: TextStyle(fontSize: 18),
-      bodySmall: TextStyle(fontSize: 14, height: 1.25),
-      bodyMedium: TextStyle(fontSize: 16, height: 1.25),
+    textTheme: TextTheme(
+      titleLarge: TextStyle(fontSize: 20,
+          fontFamilyFallback: _notoSansFallback),
+      titleSmall: TextStyle(fontSize: 18,
+          fontFamilyFallback: _notoSansFallback),
+      bodySmall: TextStyle(fontSize: 14, height: 1.25,
+          fontFamilyFallback: _notoSansFallback),
+      bodyMedium: TextStyle(fontSize: 16, height: 1.25,
+          fontFamilyFallback: _notoSansFallback),
       labelLarge: TextStyle(
         fontSize: 16.0,
         fontWeight: FontWeight.bold,
         color: accent80,
+        fontFamilyFallback: _notoSansFallback,
       ),
     ),
     cardColor: Color(0xFF24252B),
@@ -1601,9 +1621,8 @@ class OverlayDialogManager {
                 ),
               ),
               const SizedBox(height: 24),
-              // 안내 텍스트
               Text(
-                translate('Preparing for remote connection.'),
+                text,
                 textAlign: TextAlign.center,
                 style: const TextStyle(
                   fontSize: 14,
@@ -1849,7 +1868,8 @@ class CustomAlertDialog extends StatelessWidget {
       this.contentPadding,
       this.contentBoxConstraints = const BoxConstraints(maxWidth: 500),
       this.onSubmit,
-      this.onCancel})
+      this.onCancel,
+      this.scrollable})
       : super(key: key);
 
   final Widget? title;
@@ -1860,6 +1880,7 @@ class CustomAlertDialog extends StatelessWidget {
   final BoxConstraints contentBoxConstraints;
   final Function()? onSubmit;
   final Function()? onCancel;
+  final bool? scrollable;
 
   @override
   Widget build(BuildContext context) {
@@ -1896,7 +1917,7 @@ class CustomAlertDialog extends StatelessWidget {
         return KeyEventResult.ignored;
       },
       child: AlertDialog(
-          scrollable: true,
+          scrollable: scrollable ?? true,
           title: title,
           content: ConstrainedBox(
             constraints: contentBoxConstraints,
@@ -2537,20 +2558,36 @@ Future<bool> matchPeer(
 }
 
 /// Get the image for the current [platform].
-Widget getPlatformImage(String platform, {double size = 50, Color? color}) {
+/// [version] is the OS version string (e.g. "Windows 11 Pro") used to
+/// distinguish Windows 10 from Windows 11.
+Widget getPlatformImage(String platform,
+    {double size = 50, Color? color, String version = ''}) {
   if (platform.isEmpty) {
     return Container(width: size, height: size);
   }
-  if (platform == kPeerPlatformMacOS) {
-    platform = 'mac';
-  } else if (platform != kPeerPlatformLinux &&
-      platform != kPeerPlatformAndroid) {
-    platform = 'win';
+  String assetPath;
+  if (platform == kPeerPlatformMacOS ||
+      platform.toLowerCase().contains('mac')) {
+    assetPath = 'assets/icons/mac-logo.svg';
+  } else if (platform == kPeerPlatformIOS ||
+      platform.toLowerCase().contains('ios')) {
+    assetPath = 'assets/icons/ios-logo.svg';
+  } else if (platform == kPeerPlatformAndroid ||
+      platform.toLowerCase().contains('android')) {
+    assetPath = 'assets/icons/android-logo.svg';
+  } else if (platform == kPeerPlatformLinux ||
+      platform.toLowerCase().contains('linux')) {
+    assetPath = 'assets/linux.svg';
   } else {
-    platform = platform.toLowerCase();
+    // Windows: version에 "11"이 포함되면 Win11 로고, 아니면 Win10 로고
+    if (version.contains('11')) {
+      assetPath = 'assets/icons/win11-logo.svg';
+    } else {
+      assetPath = 'assets/icons/win10-logo.svg';
+    }
   }
   return SvgPicture.asset(
-    'assets/$platform.svg',
+    assetPath,
     height: size,
     width: size,
     colorFilter: color != null ? svgColor(color) : null,

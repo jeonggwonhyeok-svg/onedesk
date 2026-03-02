@@ -161,7 +161,8 @@ class AutocompletePeerTileState extends State<AutocompletePeerTile> {
                         child: Padding(
                             padding: EdgeInsets.all(6),
                             child: getPlatformImage(widget.peer.platform,
-                                size: 30))),
+                                size: 30,
+                                version: widget.peer.osVersion))),
                     Expanded(
                       child: Container(
                           padding: EdgeInsets.only(left: 10),

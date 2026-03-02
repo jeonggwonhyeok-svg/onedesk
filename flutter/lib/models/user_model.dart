@@ -8,6 +8,7 @@ import 'package:flutter_hbb/common/api/models.dart' as api_models;
 import 'package:flutter_hbb/common/api/auth_service.dart';
 import 'package:flutter_hbb/common/api/session_service.dart';
 import 'package:flutter_hbb/common/api/cookie_manager.dart';
+import 'package:flutter_hbb/common/api/api_client.dart';
 import 'package:flutter_hbb/models/ab_model.dart';
 import 'package:get/get.dart';
 
@@ -137,6 +138,12 @@ class UserModel {
 
     // 쿠키 정리
     await cookieManager.clearAllCookies();
+
+    // Rust 서비스용 인증 정보 정리
+    await bind.mainSetLocalOption(key: 'auth_cookie', value: '');
+    await bind.mainSetLocalOption(key: 'auth_user_agent', value: '');
+    await bind.mainSetLocalOption(key: 'session_key', value: '');
+    await bind.mainSetLocalOption(key: 'device_key', value: '');
   }
 
   _parseAndUpdateUser(UserPayload user) {
@@ -205,6 +212,11 @@ class UserModel {
     loginType.value = userInfo.loginType;
     deviceKey.value = userInfo.deviceKey ?? '';
     sessionKey.value = userInfo.sessionKey ?? '';
+
+    // ApiClient에 deviceKey 설정 (User-Agent에 반영)
+    if (isApiClientInitialized() && deviceKey.value.isNotEmpty) {
+      getApiClient().setDeviceKey(deviceKey.value);
+    }
     planType.value = userInfo.planType ?? 'FREE'; // 반응형 플랜 타입 업데이트
     connectionCount.value = userInfo.connectionCount; // 동시 접속 가능 수 업데이트
 
@@ -214,7 +226,45 @@ class UserModel {
       value: jsonEncode(userInfo.toJson()),
     );
 
+    // Rust 서비스에서 API 요청에 사용할 수 있도록 LocalConfig에 인증 정보 저장
+    _saveAuthInfoToLocalConfig();
+
     debugPrint('User logged in: ${userInfo.email}, planType=${userInfo.planType}, connectionCount=${userInfo.connectionCount}');
+  }
+
+  /// Rust 서비스용 인증 정보를 LocalConfig에 저장
+  void _saveAuthInfoToLocalConfig() {
+    try {
+      if (!isApiClientInitialized()) return;
+
+      final apiClient = getApiClient();
+      final domain = Uri.parse(apiClient.baseUrl).host;
+
+      // 쿠키 헤더 저장
+      final cookieHeader = cookieManager.getCookieHeader(domain);
+      if (cookieHeader.isNotEmpty) {
+        bind.mainSetLocalOption(key: 'auth_cookie', value: cookieHeader);
+      }
+
+      // User-Agent 저장
+      final userAgent = ClientInfoHelper.getClientInfo(deviceKey.value.isNotEmpty ? deviceKey.value : null);
+      bind.mainSetLocalOption(key: 'auth_user_agent', value: userAgent);
+
+      // API 서버 URL 저장
+      bind.mainSetLocalOption(key: 'api_server_url', value: apiClient.baseUrl);
+
+      // sessionKey, deviceKey 저장
+      if (sessionKey.value.isNotEmpty) {
+        bind.mainSetLocalOption(key: 'session_key', value: sessionKey.value);
+      }
+      if (deviceKey.value.isNotEmpty) {
+        bind.mainSetLocalOption(key: 'device_key', value: deviceKey.value);
+      }
+
+      debugPrint('[UserModel] Auth info saved to LocalConfig for Rust service');
+    } catch (e) {
+      debugPrint('[UserModel] Failed to save auth info to LocalConfig: $e');
+    }
   }
 
   /// 저장된 사용자 정보로 세션 복원

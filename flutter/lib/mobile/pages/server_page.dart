@@ -957,12 +957,24 @@ class _ConnectionManagerState extends State<ConnectionManager> {
     );
   }
 
-  /// 피어 캐시에서 platform 정보 조회
-  String _getPeerPlatform(String peerId) {
+  /// Client 데이터에서 platform 조회, 없으면 피어 캐시 fallback
+  String _getPeerPlatform(String peerId, {String peerPlatform = ''}) {
+    if (peerPlatform.isNotEmpty) return peerPlatform;
     try {
       final peer = bind.mainGetPeerSync(id: peerId);
       final config = jsonDecode(peer);
       return config['info']?['platform'] ?? config['platform'] ?? '';
+    } catch (e) {
+      return '';
+    }
+  }
+
+  /// 피어 캐시에서 OS 버전 정보 조회
+  String _getPeerOsVersion(String peerId) {
+    try {
+      final peer = bind.mainGetPeerSync(id: peerId);
+      final config = jsonDecode(peer);
+      return config['info']?['os_version'] ?? '';
     } catch (e) {
       return '';
     }
@@ -1358,9 +1370,10 @@ class _ConnectionManagerState extends State<ConnectionManager> {
                 ),
                 child: Center(
                   child: getPlatformImage(
-                    _getPeerPlatform(primary.peerId),
+                    _getPeerPlatform(primary.peerId, peerPlatform: primary.peerPlatform),
                     size: 24,
                     color: const Color(0xFF5F71FF),
+                    version: _getPeerOsVersion(primary.peerId),
                   ),
                 ),
               ),

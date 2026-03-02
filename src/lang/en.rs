@@ -90,6 +90,7 @@ pub static ref T: std::collections::HashMap<&'static str, &'static str> =
         ("Connection in progress. Please wait.", "Connection in progress. Please wait."),
         ("Please try 1 minute later", "Please try 1 minute later"),
         ("Login Error", "Login Error"),
+        ("Access Denied", "Access Denied"),
         ("Successful", "Successful"),
         ("Connected, waiting for image...", "Connected, waiting for image..."),
         ("Name", "Name"),
@@ -944,5 +945,8 @@ pub static ref T: std::collections::HashMap<&'static str, &'static str> =
         // Mobile login page
         ("The easiest and fastest\n way When you need your PC", "The easiest and fastest\nway when you need your PC"),
         ("ID Login/Sign up", "ID Login/Sign up"),
+        ("Bad Request", "The connection is not stable. Please try again later."),
+        ("Login other device", "You have been logged in from another device."),
+        ("Can use on update", "A new version is available.\nPlease update to continue."),
     ].iter().cloned().collect();
 }

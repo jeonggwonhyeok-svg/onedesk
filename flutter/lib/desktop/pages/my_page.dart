@@ -232,9 +232,8 @@ class _MyPageState extends State<MyPage> {
     if (!isAuthServiceInitialized()) return;
     _isCheckingRegion.value = true;
     try {
-      // final authService = getAuthService();
-      // _isKorea.value = await authService.checkIsKorea();
-      _isKorea.value = false; // 테스트용: PayPal 결제
+      final authService = getAuthService();
+      _isKorea.value = await authService.checkIsKorea();
     } catch (e) {
       debugPrint('[MyPage] checkRegion error: $e');
       _isKorea.value = false;
@@ -362,11 +361,10 @@ class _MyPageState extends State<MyPage> {
         showPasswordChangedCompletion.value = true;
         await gFFI.userModel.logOut();
       } else {
-        _passwordError.value =
-            response.message ?? translate('Password change failed');
+        _passwordError.value = translate('Bad Request');
       }
     } catch (e) {
-      _passwordError.value = e.toString();
+      _passwordError.value = translate('Bad Request');
     } finally {
       _isChangingPassword.value = false;
     }
@@ -1290,8 +1288,6 @@ class _MyPageState extends State<MyPage> {
                               style: const TextStyle(
                                 fontSize: 14,
                                 color: _textSecondary,
-                                decoration: TextDecoration.underline,
-                                decorationColor: _textSecondary,
                               ),
                             ),
                           ],
@@ -1338,7 +1334,7 @@ class _MyPageState extends State<MyPage> {
                               decoration: BoxDecoration(
                                 color: cardBgColor,
                                 borderRadius:
-                                    BorderRadius.circular(24), // 코너 둥글기 24px
+                                    BorderRadius.circular(16), // 코너 둥글기 16px
                                 border: Border.all(
                                   // 호버 또는 팀플랜(인기 플랜) 또는 현재 플랜: #5F71FF, 기본: #DEDEE2
                                   color: isHovered ||
@@ -1370,8 +1366,8 @@ class _MyPageState extends State<MyPage> {
                                         color: planNameColor,
                                         borderRadius: BorderRadius.only(
                                           topLeft: Radius.circular(
-                                              23), // 카드 24px - 보더 1px
-                                          topRight: Radius.circular(23),
+                                              15), // 카드 16px - 보더 1px
+                                          topRight: Radius.circular(15),
                                         ),
                                       ),
                                       child: Row(
@@ -1533,7 +1529,8 @@ class _MyPageState extends State<MyPage> {
                                               !isExpanded;
                                         },
                                         child: Row(
-                                          mainAxisSize: MainAxisSize.min,
+                                          mainAxisAlignment:
+                                              MainAxisAlignment.center,
                                           children: [
                                             Text(
                                               translate(
@@ -1562,21 +1559,24 @@ class _MyPageState extends State<MyPage> {
                                     ),
                                   ),
 
-                                  // 펼쳐진 경우 혜택 목록 섹션 (배경색 #F7F7F7)
+                                  // 펼쳐진 경우 혜택 목록 섹션
                                   if (isExpanded) ...[
-                                    Container(
-                                      margin: const EdgeInsets.symmetric(
+                                    Padding(
+                                      padding: const EdgeInsets.symmetric(
                                           horizontal: 12),
-                                      padding: const EdgeInsets.all(12),
-                                      decoration: BoxDecoration(
-                                        color: featuresBgColor, // #F7F7F7
-                                        borderRadius: BorderRadius.circular(
-                                            8), // 코너 둥글기 8px
-                                      ),
                                       child: Column(
                                         crossAxisAlignment:
                                             CrossAxisAlignment.start,
                                         children: [
+                                          Text(
+                                            translate('Function'),
+                                            style: const TextStyle(
+                                              fontSize: 14,
+                                              fontWeight: FontWeight.w600,
+                                              color: targetColor,
+                                            ),
+                                          ),
+                                          const SizedBox(height: 8),
                                           ...translate(plan.featuresKey)
                                               .split('\n')
                                               .map((feature) {
@@ -2237,6 +2237,436 @@ class _MyPageState extends State<MyPage> {
     });
   }
 
+  /// 기기 추가(ADDON_SESSION) 결제 다이얼로그 - 한국 (Welcome)
+  void _showAddonWelcomeDialog() {
+    final isChecked = false.obs;
+    final addonCount = 1.obs;
+
+    // ADDON_SESSION 가격 (API에서 로드된 값 사용)
+    final krwUnitPrice = _apiKrwPrices['ADDON_SESSION'] ?? 1000;
+
+    const primaryColor = Color(0xFF5F71FF);
+    const textColor = Color(0xFF454447);
+    const cardBgColor = Color(0xFFF7F7F7);
+
+    gFFI.dialogManager.show((setState, close, context) {
+      return CustomAlertDialog(
+        title: Text(
+          translate('Add number of session cconnections'),
+          style: MyTheme.dialogTitleStyle,
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              translate('Add number of session cconnections Pre'),
+              style: const TextStyle(fontSize: 14, color: textColor),
+            ),
+            const SizedBox(height: 20),
+            // 카드 영역
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(20),
+              decoration: BoxDecoration(
+                color: cardBgColor,
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    translate('Add number of session cconnections'),
+                    style: const TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.w600,
+                      color: textColor,
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  // [-] 수량 [+] 스테퍼
+                  Obx(() => Row(
+                    children: [
+                      // - 버튼
+                      GestureDetector(
+                        onTap: () {
+                          if (addonCount.value > 1) addonCount.value--;
+                        },
+                        child: Container(
+                          width: 40,
+                          height: 40,
+                          decoration: BoxDecoration(
+                            borderRadius: BorderRadius.circular(8),
+                            border: Border.all(color: const Color(0xFFDEDEE2)),
+                          ),
+                          child: const Center(
+                            child: Text('−', style: TextStyle(fontSize: 20, color: textColor)),
+                          ),
+                        ),
+                      ),
+                      // 수량 표시
+                      Expanded(
+                        child: Container(
+                          height: 40,
+                          margin: const EdgeInsets.symmetric(horizontal: 8),
+                          decoration: BoxDecoration(
+                            borderRadius: BorderRadius.circular(8),
+                            border: Border.all(color: const Color(0xFFDEDEE2)),
+                          ),
+                          child: Center(
+                            child: Text(
+                              '${addonCount.value}',
+                              style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600, color: textColor),
+                            ),
+                          ),
+                        ),
+                      ),
+                      // + 버튼
+                      GestureDetector(
+                        onTap: () => addonCount.value++,
+                        child: Container(
+                          width: 40,
+                          height: 40,
+                          decoration: BoxDecoration(
+                            borderRadius: BorderRadius.circular(8),
+                            border: Border.all(color: const Color(0xFFDEDEE2)),
+                          ),
+                          child: const Center(
+                            child: Text('+', style: TextStyle(fontSize: 20, color: textColor)),
+                          ),
+                        ),
+                      ),
+                    ],
+                  )),
+                  const SizedBox(height: 16),
+                  // 총 가격
+                  Align(
+                    alignment: Alignment.centerRight,
+                    child: Obx(() => Row(
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.baseline,
+                      textBaseline: TextBaseline.alphabetic,
+                      children: [
+                        Text(
+                          translate('total_payment'),
+                          style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w700, color: primaryColor),
+                        ),
+                        const SizedBox(width: 8),
+                        Text(
+                          '${_formatPrice(krwUnitPrice * addonCount.value)}${translate("Won")}',
+                          style: const TextStyle(fontSize: 24, fontWeight: FontWeight.w700, color: primaryColor),
+                        ),
+                        Text(
+                          '/${translate("Month")}',
+                          style: const TextStyle(fontSize: 14, color: textColor),
+                        ),
+                      ],
+                    )),
+                  ),
+                  const SizedBox(height: 4),
+                  Align(
+                    alignment: Alignment.centerRight,
+                    child: Text(
+                      translate('vat_excluded'),
+                      style: const TextStyle(fontSize: 12, color: Color(0xFFB9B8BF)),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 20),
+            // 약관 동의
+            Obx(() => GestureDetector(
+              onTap: () => isChecked.value = !isChecked.value,
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  StyledCheckbox(
+                    value: isChecked.value,
+                    onChanged: (v) => isChecked.value = v ?? false,
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(child: _buildPaymentAgreeText()),
+                ],
+              ),
+            )),
+          ],
+        ),
+        actions: [
+          Row(
+            children: [
+              Expanded(
+                child: StyledOutlinedButton(
+                  label: translate('Cancel'),
+                  onPressed: close,
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Obx(() => StyledPrimaryButton(
+                  label: translate('OK'),
+                  onPressed: isChecked.value
+                      ? () {
+                          close();
+                          // TODO: Welcome 결제 시작
+                        }
+                      : null,
+                )),
+              ),
+            ],
+          ),
+        ],
+        onCancel: close,
+      );
+    });
+  }
+
+  /// 기기 추가(ADDON_SESSION) 결제 다이얼로그 - 해외 (PayPal/Paddle)
+  void _showAddonGlobalDialog() {
+    final isChecked = false.obs;
+    final addonCount = 1.obs;
+    final selectedProvider = Rxn<PaymentProvider>();
+
+    // ADDON_SESSION 가격 (API에서 로드된 값 사용)
+    final usdUnitPrice = _apiUsdPrices['ADDON_SESSION'] ?? 1.0;
+
+    const primaryColor = Color(0xFF5F71FF);
+    const textColor = Color(0xFF454447);
+    const cardBgColor = Color(0xFFF7F7F7);
+    const sectionTitleColor = Color(0xFF1A191C);
+
+    gFFI.dialogManager.show((setState, close, context) {
+      return CustomAlertDialog(
+        title: Text(
+          translate('Add number of session cconnections'),
+          style: MyTheme.dialogTitleStyle,
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // 결제 수단 섹션
+            Text(
+              translate('payment_method'),
+              style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600, color: sectionTitleColor),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              translate('payment_method_select'),
+              style: const TextStyle(fontSize: 14, color: textColor),
+            ),
+            const SizedBox(height: 16),
+            // PayPal / Paddle 선택
+            Obx(() => Row(
+              children: [
+                Expanded(
+                  child: GestureDetector(
+                    onTap: () => selectedProvider.value = PaymentProvider.paypal,
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(vertical: 16),
+                      decoration: BoxDecoration(
+                        color: selectedProvider.value == PaymentProvider.paypal
+                            ? const Color(0xFFEFF1FF) : cardBgColor,
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(
+                          color: selectedProvider.value == PaymentProvider.paypal
+                              ? primaryColor : cardBgColor,
+                          width: selectedProvider.value == PaymentProvider.paypal ? 2 : 1,
+                        ),
+                      ),
+                      child: Center(child: Image.asset('assets/icons/paypal.png', height: 24)),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: GestureDetector(
+                    onTap: () => selectedProvider.value = PaymentProvider.paddle,
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(vertical: 16),
+                      decoration: BoxDecoration(
+                        color: selectedProvider.value == PaymentProvider.paddle
+                            ? const Color(0xFFEFF1FF) : cardBgColor,
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(
+                          color: selectedProvider.value == PaymentProvider.paddle
+                              ? primaryColor : cardBgColor,
+                          width: selectedProvider.value == PaymentProvider.paddle ? 2 : 1,
+                        ),
+                      ),
+                      child: Center(child: Image.asset('assets/icons/paddle.png', height: 24)),
+                    ),
+                  ),
+                ),
+              ],
+            )),
+            const SizedBox(height: 24),
+            // 주문 상품 섹션
+            Text(
+              translate('order_summary_title'),
+              style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600, color: sectionTitleColor),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              translate('Add number of session cconnections Pre'),
+              style: const TextStyle(fontSize: 14, color: textColor),
+            ),
+            const SizedBox(height: 16),
+            // 카드 영역
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(20),
+              decoration: BoxDecoration(
+                color: cardBgColor,
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    translate('Add number of session cconnections'),
+                    style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600, color: textColor),
+                  ),
+                  const SizedBox(height: 16),
+                  // [-] 수량 [+] 스테퍼
+                  Obx(() => Row(
+                    children: [
+                      GestureDetector(
+                        onTap: () {
+                          if (addonCount.value > 1) addonCount.value--;
+                        },
+                        child: Container(
+                          width: 40, height: 40,
+                          decoration: BoxDecoration(
+                            borderRadius: BorderRadius.circular(8),
+                            border: Border.all(color: const Color(0xFFDEDEE2)),
+                          ),
+                          child: const Center(child: Text('−', style: TextStyle(fontSize: 20, color: textColor))),
+                        ),
+                      ),
+                      Expanded(
+                        child: Container(
+                          height: 40,
+                          margin: const EdgeInsets.symmetric(horizontal: 8),
+                          decoration: BoxDecoration(
+                            borderRadius: BorderRadius.circular(8),
+                            border: Border.all(color: const Color(0xFFDEDEE2)),
+                          ),
+                          child: Center(
+                            child: Text('${addonCount.value}', style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600, color: textColor)),
+                          ),
+                        ),
+                      ),
+                      GestureDetector(
+                        onTap: () => addonCount.value++,
+                        child: Container(
+                          width: 40, height: 40,
+                          decoration: BoxDecoration(
+                            borderRadius: BorderRadius.circular(8),
+                            border: Border.all(color: const Color(0xFFDEDEE2)),
+                          ),
+                          child: const Center(child: Text('+', style: TextStyle(fontSize: 20, color: textColor))),
+                        ),
+                      ),
+                    ],
+                  )),
+                  const SizedBox(height: 16),
+                  // 총 가격 (USD)
+                  Align(
+                    alignment: Alignment.centerRight,
+                    child: Obx(() => Row(
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.baseline,
+                      textBaseline: TextBaseline.alphabetic,
+                      children: [
+                        Text(
+                          translate('total_payment'),
+                          style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w700, color: primaryColor),
+                        ),
+                        const SizedBox(width: 8),
+                        Text(
+                          '\$${(usdUnitPrice * addonCount.value).toStringAsFixed(0)}',
+                          style: const TextStyle(fontSize: 24, fontWeight: FontWeight.w700, color: primaryColor),
+                        ),
+                        Text(
+                          '/${translate("Month")}',
+                          style: const TextStyle(fontSize: 14, color: textColor),
+                        ),
+                      ],
+                    )),
+                  ),
+                  const SizedBox(height: 4),
+                  Align(
+                    alignment: Alignment.centerRight,
+                    child: Text(
+                      translate('vat_excluded'),
+                      style: const TextStyle(fontSize: 12, color: Color(0xFFB9B8BF)),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 20),
+            // 약관 동의
+            Obx(() => GestureDetector(
+              onTap: () => isChecked.value = !isChecked.value,
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  StyledCheckbox(
+                    value: isChecked.value,
+                    onChanged: (v) => isChecked.value = v ?? false,
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(child: _buildPaymentAgreeText()),
+                ],
+              ),
+            )),
+          ],
+        ),
+        actions: [
+          Row(
+            children: [
+              Expanded(
+                child: StyledOutlinedButton(
+                  label: translate('Cancel'),
+                  onPressed: close,
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Obx(() => StyledPrimaryButton(
+                  label: translate('OK'),
+                  onPressed: isChecked.value && selectedProvider.value != null
+                      ? () {
+                          close();
+                          // TODO: 해외 결제 시작
+                        }
+                      : null,
+                )),
+              ),
+            ],
+          ),
+        ],
+        onCancel: close,
+      );
+    });
+  }
+
+  /// 기기 추가 결제 다이얼로그 표시 (IP 기반 분기)
+  void showAddonSessionDialog() {
+    if (_isKorea.value) {
+      _showAddonWelcomeDialog();
+    } else {
+      _showAddonGlobalDialog();
+    }
+  }
+
+  /// 기기 추가 결제 다이얼로그 (외부 호출용 static)
+  static void showAddonDialog() {
+    showDesktopAddonSessionDialog();
+  }
+
   /// 결제 약관 동의 텍스트 빌드 (링크 포함)
   Widget _buildPaymentAgreeText() {
     const textColor = Color(0xFF454447);
@@ -2279,8 +2709,6 @@ class _MyPageState extends State<MyPage> {
                   style: const TextStyle(
                     fontSize: 14,
                     color: linkColor,
-                    decoration: TextDecoration.underline,
-                    decorationColor: linkColor,
                   ),
                 ),
               ),
@@ -2560,7 +2988,7 @@ class _MyPageState extends State<MyPage> {
     debugPrint('[Payment] Global 결제 시작: $productCode, provider: $provider');
 
     if (!isPaymentServiceInitialized()) {
-      _showPaymentError(translate('Payment error'),
+      _showPaymentError(translate('Bad Request'),
           details: 'PaymentService not initialized.');
       return;
     }
@@ -2584,7 +3012,7 @@ class _MyPageState extends State<MyPage> {
               response.data!['url'];
           orderId = response.data!['subscriptionId']; // PayPal subscriptionId
         } else {
-          _showPaymentError(response.message ?? translate('Payment error'));
+          _showPaymentError(translate('Bad Request'));
           return;
         }
       } else if (provider == PaymentProvider.paddle) {
@@ -2610,7 +3038,7 @@ class _MyPageState extends State<MyPage> {
             debugPrint('[Payment] PaddleLocalServer started for orderId: $orderId');
           }
         } else {
-          _showPaymentError(response.message ?? translate('Payment error'));
+          _showPaymentError(translate('Bad Request'));
           return;
         }
       }
@@ -2630,12 +3058,12 @@ class _MyPageState extends State<MyPage> {
         _paymentUrl.value = paymentUrl;
         _currentView.value = MyPageView.paymentWebView;
       } else {
-        _showPaymentError(translate('Payment error'),
+        _showPaymentError(translate('Bad Request'),
             details: 'Payment URL not found.');
       }
     } catch (e) {
       debugPrint('[Payment] Global payment error: $e');
-      _showPaymentError(translate('Payment error'), details: e.toString());
+      _showPaymentError(translate('Bad Request'), details: e.toString());
     } finally {
       _isPaymentLoading.value = false;
     }
@@ -2648,7 +3076,7 @@ class _MyPageState extends State<MyPage> {
 
     // 서비스 초기화 확인
     if (!isPaymentServiceInitialized()) {
-      _showPaymentError(translate('Payment error'),
+      _showPaymentError(translate('Bad Request'),
           details: 'PaymentService가 초기화되지 않았습니다.');
       return;
     }
@@ -2663,7 +3091,7 @@ class _MyPageState extends State<MyPage> {
       final response = await paymentService.createWelcomeBilling(productCode);
 
       if (!response.success || response.data == null) {
-        _showPaymentError(response.message ?? translate('Payment error'),
+        _showPaymentError(translate('Bad Request'),
             details: 'API 응답 실패: ${response.rawBody}');
         return;
       }
@@ -2672,7 +3100,7 @@ class _MyPageState extends State<MyPage> {
       final actionUrl = data['actionUrl'];
 
       if (actionUrl == null || actionUrl.toString().isEmpty) {
-        _showPaymentError(translate('Payment error'),
+        _showPaymentError(translate('Bad Request'),
             details: 'actionUrl이 없습니다.');
         return;
       }
@@ -3369,4 +3797,590 @@ class _InAppWebViewWidgetState extends State<_InAppWebViewWidget> {
       ],
     );
   }
+}
+
+/// 가격 포맷팅 (천 단위 콤마) - top-level
+String _formatAddonPrice(int price) {
+  return price.toString().replaceAllMapped(
+    RegExp(r'(\d{1,3})(?=(\d{3})+(?!\d))'),
+    (Match m) => '${m[1]},',
+  );
+}
+
+/// 결제 약관 동의 텍스트 빌드 (top-level)
+Widget _buildAddonPaymentAgreeText() {
+  const textColor = Color(0xFF454447);
+  const linkColor = Color(0xFF5F71FF);
+
+  final fullText = translate('payment_agree_text');
+  final startIndex = fullText.indexOf('<');
+  final endIndex = fullText.indexOf('>');
+
+  if (startIndex == -1 || endIndex == -1 || startIndex >= endIndex) {
+    return Text(fullText, style: const TextStyle(fontSize: 14, color: textColor));
+  }
+
+  final beforeLink = fullText.substring(0, startIndex);
+  final linkText = fullText.substring(startIndex + 1, endIndex);
+  final afterLink = fullText.substring(endIndex + 1);
+
+  return Text.rich(
+    TextSpan(
+      style: const TextStyle(fontSize: 14, color: textColor),
+      children: [
+        if (beforeLink.isNotEmpty) TextSpan(text: beforeLink),
+        WidgetSpan(
+          alignment: PlaceholderAlignment.baseline,
+          baseline: TextBaseline.alphabetic,
+          child: MouseRegion(
+            cursor: SystemMouseCursors.click,
+            child: GestureDetector(
+              onTap: () => launchUrlString('https://onedesk.co.kr/refund'),
+              child: Text(linkText, style: const TextStyle(fontSize: 14, color: linkColor)),
+            ),
+          ),
+        ),
+        if (afterLink.isNotEmpty) TextSpan(text: afterLink),
+      ],
+    ),
+  );
+}
+
+/// 기기 추가 결제 다이얼로그 (desktop_home_page 등에서 호출)
+Future<void> showDesktopAddonSessionDialog() async {
+  // 지역 확인
+  bool isKorea = false;
+  // TODO: 테스트용 하드코딩 - 나중에 복원 필요
+  // if (isAuthServiceInitialized()) {
+  //   try {
+  //     isKorea = await getAuthService().checkIsKorea();
+  //   } catch (_) {}
+  // }
+
+  // 가격 조회
+  int krwUnitPrice = 1000;
+  double usdUnitPrice = 1.0;
+  if (isPaymentServiceInitialized()) {
+    try {
+      final response = await getPaymentService().getPlanList();
+      if (response.success) {
+        final products = response.extract('') as List<dynamic>?;
+        if (products != null) {
+          for (final product in products) {
+            if (product['productCode'] == 'ADDON_SESSION') {
+              krwUnitPrice = product['amount'] as int? ?? 1000;
+              usdUnitPrice = (product['usdAmount'] as num?)?.toDouble() ?? 1.0;
+              break;
+            }
+          }
+        }
+      }
+    } catch (_) {}
+  }
+
+  if (isKorea) {
+    _showAddonWelcomeDialogStandalone(krwUnitPrice);
+  } else {
+    _showAddonGlobalDialogStandalone(usdUnitPrice);
+  }
+}
+
+/// 기기 추가 - 한국 결제 다이얼로그 (standalone)
+void _showAddonWelcomeDialogStandalone(int krwUnitPrice) {
+  final isChecked = false.obs;
+  final addonCount = 1.obs;
+
+  const primaryColor = Color(0xFF5F71FF);
+  const textColor = Color(0xFF454447);
+  const cardBgColor = Color(0xFFF7F7F7);
+
+  gFFI.dialogManager.show((setState, close, context) {
+    return CustomAlertDialog(
+      title: Text(
+        translate('Add number of session cconnections'),
+        style: MyTheme.dialogTitleStyle,
+      ),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            translate('Add number of session cconnections Pre'),
+            style: const TextStyle(fontSize: 14, color: textColor),
+          ),
+          const SizedBox(height: 20),
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(20),
+            decoration: BoxDecoration(
+              color: cardBgColor,
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  translate('Add number of session cconnections'),
+                  style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600, color: textColor),
+                ),
+                const SizedBox(height: 16),
+                Obx(() => Row(
+                  children: [
+                    GestureDetector(
+                      onTap: () { if (addonCount.value > 1) addonCount.value--; },
+                      child: Container(
+                        width: 40, height: 40,
+                        decoration: BoxDecoration(
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border.all(color: const Color(0xFFDEDEE2)),
+                        ),
+                        child: const Center(child: Text('−', style: TextStyle(fontSize: 20, color: textColor))),
+                      ),
+                    ),
+                    Expanded(
+                      child: Container(
+                        height: 40,
+                        margin: const EdgeInsets.symmetric(horizontal: 8),
+                        decoration: BoxDecoration(
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border.all(color: const Color(0xFFDEDEE2)),
+                        ),
+                        child: Center(
+                          child: Text('${addonCount.value}', style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600, color: textColor)),
+                        ),
+                      ),
+                    ),
+                    GestureDetector(
+                      onTap: () => addonCount.value++,
+                      child: Container(
+                        width: 40, height: 40,
+                        decoration: BoxDecoration(
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border.all(color: const Color(0xFFDEDEE2)),
+                        ),
+                        child: const Center(child: Text('+', style: TextStyle(fontSize: 20, color: textColor))),
+                      ),
+                    ),
+                  ],
+                )),
+                const SizedBox(height: 16),
+                Align(
+                  alignment: Alignment.centerRight,
+                  child: Obx(() => Row(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.baseline,
+                    textBaseline: TextBaseline.alphabetic,
+                    children: [
+                      Text(translate('total_payment'), style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w700, color: primaryColor)),
+                      const SizedBox(width: 8),
+                      Text('${_formatAddonPrice(krwUnitPrice * addonCount.value)}${translate("Won")}', style: const TextStyle(fontSize: 24, fontWeight: FontWeight.w700, color: primaryColor)),
+                      Text('/${translate("Month")}', style: const TextStyle(fontSize: 14, color: textColor)),
+                    ],
+                  )),
+                ),
+                const SizedBox(height: 4),
+                Align(
+                  alignment: Alignment.centerRight,
+                  child: Text(translate('vat_excluded'), style: const TextStyle(fontSize: 12, color: Color(0xFFB9B8BF))),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 20),
+          Obx(() => GestureDetector(
+            onTap: () => isChecked.value = !isChecked.value,
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                StyledCheckbox(value: isChecked.value, onChanged: (v) => isChecked.value = v ?? false),
+                const SizedBox(width: 8),
+                Expanded(child: _buildAddonPaymentAgreeText()),
+              ],
+            ),
+          )),
+        ],
+      ),
+      actions: [
+        Row(
+          children: [
+            Expanded(child: StyledOutlinedButton(label: translate('Cancel'), onPressed: close)),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Obx(() => StyledPrimaryButton(
+                label: translate('OK'),
+                onPressed: isChecked.value ? () {
+                  close();
+                  _startAddonWelcomePayment(krwUnitPrice, addonCount.value);
+                } : null,
+              )),
+            ),
+          ],
+        ),
+      ],
+      onCancel: close,
+    );
+  });
+}
+
+/// 기기 추가 Welcome 일반결제 시작
+Future<void> _startAddonWelcomePayment(int unitPrice, int count) async {
+  debugPrint('[AddonPayment] Welcome 결제 시작: unitPrice=$unitPrice, count=$count');
+
+  if (!isPaymentServiceInitialized()) {
+    debugPrint('[AddonPayment] PaymentService not initialized');
+    return;
+  }
+
+  try {
+    final paymentService = getPaymentService();
+    final response = await paymentService.createWelcomeOrder(unitPrice, count);
+
+    if (!response.success || response.data == null) {
+      debugPrint('[AddonPayment] 주문 생성 실패: ${response.message}');
+      gFFI.dialogManager.show((setState, close, context) {
+        return CustomAlertDialog(
+          title: Text(translate('Payment error')),
+          content: Text(translate('Bad Request')),
+          actions: [dialogButton(translate('OK'), onPressed: close)],
+          onSubmit: close,
+        );
+      });
+      return;
+    }
+
+    final data = response.data!;
+    debugPrint('[AddonPayment] 주문 생성 성공: $data');
+
+    // Web Standard HTML 생성
+    final htmlContent = _buildAddonWelcomeStdPayHtml(data);
+
+    // MyPage의 WebView로 결제창 열기
+    // DesktopTabPage에서 MyPage 탭을 열고 WebView 모드로 전환
+    try {
+      DesktopTabController tabController = Get.find<DesktopTabController>();
+
+      // 기존 마이페이지 탭이 있으면 제거
+      final existingIndex = tabController.state.value.tabs.indexWhere(
+        (t) => t.key == 'my-page' || t.key == 'addon-payment',
+      );
+      if (existingIndex != -1) {
+        tabController.closeBy(tabController.state.value.tabs[existingIndex].key);
+      }
+
+      // 새 탭으로 WebView 열기
+      tabController.add(TabInfo(
+        key: 'addon-payment',
+        label: translate('Add number of session cconnections'),
+        selectedIcon: Icons.payment,
+        unselectedIcon: Icons.payment,
+        page: _AddonPaymentWebView(htmlContent: htmlContent),
+      ));
+    } catch (e) {
+      debugPrint('[AddonPayment] Tab 열기 실패: $e');
+    }
+  } catch (e) {
+    debugPrint('[AddonPayment] 결제 오류: $e');
+  }
+}
+
+/// 애드온 Web Standard 결제 HTML 생성
+String _buildAddonWelcomeStdPayHtml(Map<String, dynamic> data) {
+  final version = data['version'] ?? '1.0';
+  final mid = data['mid'] ?? '';
+  final oid = data['oid'] ?? '';
+  final goodname = data['goodname'] ?? '';
+  final price = data['price'] ?? '';
+  final currency = data['currency'] ?? 'WON';
+  final buyername = data['buyername'] ?? '';
+  final buyertel = data['buyertel'] ?? '';
+  final buyeremail = data['buyeremail'] ?? '';
+  final timestamp = data['timestamp'] ?? '';
+  final signature = data['signature'] ?? '';
+  final returnUrl = data['returnUrl'] ?? '';
+  final closeUrl = data['closeUrl'] ?? '';
+  final mKey = data['mKey'] ?? '';
+  final gopaymethod = data['gopaymethod'] ?? 'Card';
+  final charset = data['charset'] ?? 'UTF-8';
+  final payViewType = data['payViewType'] ?? 'overlay';
+
+  return '''
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>결제 처리 중...</title>
+  <script language="javascript" type="text/javascript"
+    src="https://stdpay.paywelcome.co.kr/stdjs/INIStdPay.js"
+    charset="UTF-8"></script>
+  <style>
+    body {
+      display: flex; justify-content: center; align-items: center;
+      height: 100vh; margin: 0; background-color: #f5f5f5;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    }
+    .loading { text-align: center; }
+    .spinner {
+      width: 50px; height: 50px;
+      border: 3px solid #e0e0e0; border-top: 3px solid #5F71FF;
+      border-radius: 50%; animation: spin 1s linear infinite;
+      margin: 0 auto 20px;
+    }
+    @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+    .text { color: #666; font-size: 16px; }
+  </style>
+</head>
+<body>
+  <div class="loading">
+    <div class="spinner"></div>
+    <p class="text">결제 페이지로 이동 중...</p>
+  </div>
+
+  <form id="SendPayForm_id" name="SendPayForm_name" method="POST">
+    <input type="hidden" name="version" value="$version" />
+    <input type="hidden" name="mid" value="$mid" />
+    <input type="hidden" name="oid" value="$oid" />
+    <input type="hidden" name="goodname" value="$goodname" />
+    <input type="hidden" name="price" value="$price" />
+    <input type="hidden" name="currency" value="$currency" />
+    <input type="hidden" name="buyername" value="$buyername" />
+    <input type="hidden" name="buyertel" value="$buyertel" />
+    <input type="hidden" name="buyeremail" value="$buyeremail" />
+    <input type="hidden" name="timestamp" value="$timestamp" />
+    <input type="hidden" name="signature" value="$signature" />
+    <input type="hidden" name="returnUrl" value="$returnUrl" />
+    <input type="hidden" name="closeUrl" value="$closeUrl" />
+    <input type="hidden" name="mKey" value="$mKey" />
+    <input type="hidden" name="gopaymethod" value="$gopaymethod" />
+    <input type="hidden" name="charset" value="$charset" />
+    <input type="hidden" name="payViewType" value="$payViewType" />
+  </form>
+
+  <script>
+    window.onload = function() {
+      setTimeout(function() {
+        try {
+          INIStdPay.pay('SendPayForm_id');
+        } catch(e) {
+          document.querySelector('.text').textContent = '결제 모듈 로딩 실패: ' + e.message;
+        }
+      }, 1000);
+    };
+  </script>
+</body>
+</html>
+''';
+}
+
+/// 애드온 결제 WebView 위젯
+class _AddonPaymentWebView extends StatefulWidget {
+  final String htmlContent;
+  const _AddonPaymentWebView({required this.htmlContent});
+
+  @override
+  State<_AddonPaymentWebView> createState() => _AddonPaymentWebViewState();
+}
+
+class _AddonPaymentWebViewState extends State<_AddonPaymentWebView> {
+  late final iaw.InAppWebViewController? _controller;
+
+  @override
+  Widget build(BuildContext context) {
+    return iaw.InAppWebView(
+      initialData: iaw.InAppWebViewInitialData(
+        data: widget.htmlContent,
+        mimeType: 'text/html',
+        encoding: 'utf-8',
+      ),
+      initialSettings: iaw.InAppWebViewSettings(
+        javaScriptEnabled: true,
+        domStorageEnabled: true,
+        allowsInlineMediaPlayback: true,
+        mixedContentMode: iaw.MixedContentMode.MIXED_CONTENT_ALWAYS_ALLOW,
+      ),
+      onWebViewCreated: (controller) {
+        _controller = controller;
+      },
+      onLoadStop: (controller, url) {
+        debugPrint('[AddonPaymentWebView] onLoadStop: $url');
+        // 결제 완료/취소/실패 URL 감지
+        final urlStr = url?.toString() ?? '';
+        if (urlStr.contains('/success') || urlStr.contains('/close') || urlStr.contains('/cancel') || urlStr.contains('/fail')) {
+          debugPrint('[AddonPaymentWebView] 결제 결과 감지: $urlStr');
+          // 탭 닫기
+          try {
+            final tabController = Get.find<DesktopTabController>();
+            tabController.closeBy('addon-payment');
+          } catch (_) {}
+        }
+      },
+    );
+  }
+}
+
+/// 기기 추가 - 해외 결제 다이얼로그 (standalone)
+void _showAddonGlobalDialogStandalone(double usdUnitPrice) {
+  final isChecked = false.obs;
+  final addonCount = 1.obs;
+  final selectedProvider = Rxn<PaymentProvider>();
+
+  const primaryColor = Color(0xFF5F71FF);
+  const textColor = Color(0xFF454447);
+  const cardBgColor = Color(0xFFF7F7F7);
+  const sectionTitleColor = Color(0xFF1A191C);
+
+  gFFI.dialogManager.show((setState, close, context) {
+    return CustomAlertDialog(
+      title: Text(
+        translate('Add number of session cconnections'),
+        style: MyTheme.dialogTitleStyle,
+      ),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(translate('payment_method'), style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600, color: sectionTitleColor)),
+          const SizedBox(height: 8),
+          Text(translate('payment_method_select'), style: const TextStyle(fontSize: 14, color: textColor)),
+          const SizedBox(height: 16),
+          Obx(() => Row(
+            children: [
+              Expanded(
+                child: GestureDetector(
+                  onTap: () => selectedProvider.value = PaymentProvider.paypal,
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(vertical: 16),
+                    decoration: BoxDecoration(
+                      color: selectedProvider.value == PaymentProvider.paypal ? const Color(0xFFEFF1FF) : cardBgColor,
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(
+                        color: selectedProvider.value == PaymentProvider.paypal ? primaryColor : cardBgColor,
+                        width: selectedProvider.value == PaymentProvider.paypal ? 2 : 1,
+                      ),
+                    ),
+                    child: Center(child: Image.asset('assets/icons/paypal.png', height: 24)),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: GestureDetector(
+                  onTap: () => selectedProvider.value = PaymentProvider.paddle,
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(vertical: 16),
+                    decoration: BoxDecoration(
+                      color: selectedProvider.value == PaymentProvider.paddle ? const Color(0xFFEFF1FF) : cardBgColor,
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(
+                        color: selectedProvider.value == PaymentProvider.paddle ? primaryColor : cardBgColor,
+                        width: selectedProvider.value == PaymentProvider.paddle ? 2 : 1,
+                      ),
+                    ),
+                    child: Center(child: Image.asset('assets/icons/paddle.png', height: 24)),
+                  ),
+                ),
+              ),
+            ],
+          )),
+          const SizedBox(height: 24),
+          Text(translate('order_summary_title'), style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600, color: sectionTitleColor)),
+          const SizedBox(height: 8),
+          Text(translate('Add number of session cconnections Pre'), style: const TextStyle(fontSize: 14, color: textColor)),
+          const SizedBox(height: 16),
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(20),
+            decoration: BoxDecoration(
+              color: cardBgColor,
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(translate('Add number of session cconnections'), style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600, color: textColor)),
+                const SizedBox(height: 16),
+                Obx(() => Row(
+                  children: [
+                    GestureDetector(
+                      onTap: () { if (addonCount.value > 1) addonCount.value--; },
+                      child: Container(
+                        width: 40, height: 40,
+                        decoration: BoxDecoration(borderRadius: BorderRadius.circular(8), border: Border.all(color: const Color(0xFFDEDEE2))),
+                        child: const Center(child: Text('−', style: TextStyle(fontSize: 20, color: textColor))),
+                      ),
+                    ),
+                    Expanded(
+                      child: Container(
+                        height: 40,
+                        margin: const EdgeInsets.symmetric(horizontal: 8),
+                        decoration: BoxDecoration(borderRadius: BorderRadius.circular(8), border: Border.all(color: const Color(0xFFDEDEE2))),
+                        child: Center(child: Text('${addonCount.value}', style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600, color: textColor))),
+                      ),
+                    ),
+                    GestureDetector(
+                      onTap: () => addonCount.value++,
+                      child: Container(
+                        width: 40, height: 40,
+                        decoration: BoxDecoration(borderRadius: BorderRadius.circular(8), border: Border.all(color: const Color(0xFFDEDEE2))),
+                        child: const Center(child: Text('+', style: TextStyle(fontSize: 20, color: textColor))),
+                      ),
+                    ),
+                  ],
+                )),
+                const SizedBox(height: 16),
+                Align(
+                  alignment: Alignment.centerRight,
+                  child: Obx(() => Row(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.baseline,
+                    textBaseline: TextBaseline.alphabetic,
+                    children: [
+                      Text(translate('total_payment'), style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w700, color: primaryColor)),
+                      const SizedBox(width: 8),
+                      Text('\$${(usdUnitPrice * addonCount.value).toStringAsFixed(0)}', style: const TextStyle(fontSize: 24, fontWeight: FontWeight.w700, color: primaryColor)),
+                      Text('/${translate("Month")}', style: const TextStyle(fontSize: 14, color: textColor)),
+                    ],
+                  )),
+                ),
+                const SizedBox(height: 4),
+                Align(
+                  alignment: Alignment.centerRight,
+                  child: Text(translate('vat_excluded'), style: const TextStyle(fontSize: 12, color: Color(0xFFB9B8BF))),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 20),
+          Obx(() => GestureDetector(
+            onTap: () => isChecked.value = !isChecked.value,
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                StyledCheckbox(value: isChecked.value, onChanged: (v) => isChecked.value = v ?? false),
+                const SizedBox(width: 8),
+                Expanded(child: _buildAddonPaymentAgreeText()),
+              ],
+            ),
+          )),
+        ],
+      ),
+      actions: [
+        Row(
+          children: [
+            Expanded(child: StyledOutlinedButton(label: translate('Cancel'), onPressed: close)),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Obx(() => StyledPrimaryButton(
+                label: translate('OK'),
+                onPressed: isChecked.value && selectedProvider.value != null
+                    ? () { close(); /* TODO: 해외 결제 시작 */ }
+                    : null,
+              )),
+            ),
+          ],
+        ),
+      ],
+      onCancel: close,
+    );
+  });
 }

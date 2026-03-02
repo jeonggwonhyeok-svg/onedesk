@@ -328,6 +328,7 @@ class ChatPage extends StatelessWidget implements PageShape {
 class MobileChatPage extends StatelessWidget {
   final String peerId;
   final int connId;
+  final ChatPageType? chatPageType;
 
   static const Color _titleColor = Color(0xFF454447);
 
@@ -335,6 +336,7 @@ class MobileChatPage extends StatelessWidget {
     Key? key,
     required this.peerId,
     required this.connId,
+    this.chatPageType = ChatPageType.mobileMain,
   }) : super(key: key);
 
   @override
@@ -347,7 +349,13 @@ class MobileChatPage extends StatelessWidget {
         elevation: 0,
         leading: IconButton(
           icon: const Icon(Icons.arrow_back_ios, color: _titleColor, size: 20),
-          onPressed: () => Navigator.pop(context),
+          onPressed: () {
+            if (Navigator.canPop(context)) {
+              Navigator.pop(context);
+            } else {
+              Get.back();
+            }
+          },
         ),
         title: Text(
           '[$peerId]',
@@ -357,9 +365,10 @@ class MobileChatPage extends StatelessWidget {
             fontWeight: FontWeight.w600,
           ),
         ),
-        centerTitle: true,
+        centerTitle: false,
+        titleSpacing: 0,
       ),
-      body: ChatPage(type: ChatPageType.mobileMain),
+      body: ChatPage(type: chatPageType),
     );
   }
 }

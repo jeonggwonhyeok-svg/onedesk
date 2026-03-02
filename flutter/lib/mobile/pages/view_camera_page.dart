@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io' show Platform;
 import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
@@ -438,8 +439,8 @@ class _ViewCameraPageState extends State<ViewCameraPage>
     return Positioned(
       left: 0,
       right: 0,
-      top: isPortrait ? 8 : null,
-      bottom: isPortrait ? null : 8,
+      top: (isPortrait && !Platform.isIOS) ? 8 : null,
+      bottom: (isPortrait && !Platform.isIOS) ? null : 8,
       child: Center(
         child: ListenableBuilder(
           listenable: gFFI.recordingModel,
@@ -467,7 +468,7 @@ class _ViewCameraPageState extends State<ViewCameraPage>
     // Communication popup items
     final commItems = <SimpleMenuItem>[
       SimpleMenuItem('Chat', () => onPressedTextChat(widget.id)),
-      if (!isWeb)
+      if (!isWeb && !Platform.isIOS)
         SimpleMenuItem(
           (isInVoiceCall || isWaitingVoiceCall)
               ? 'End Voice Call'
@@ -498,13 +499,14 @@ class _ViewCameraPageState extends State<ViewCameraPage>
 
     // Left group
     final leftButtons = <Widget>[
-      // Recording/Screenshot (popup)
-      toolbarPopupButton(
-        asset: 'assets/icons/remote_screen.svg',
-        label: 'Recording',
-        items: recordItems,
-        isPortrait: isPortrait,
-      ),
+      // Recording/Screenshot (popup) - iOS에서는 불가능하므로 숨김
+      if (!Platform.isIOS)
+        toolbarPopupButton(
+          asset: 'assets/icons/remote_screen.svg',
+          label: 'Recording',
+          items: recordItems,
+          isPortrait: isPortrait,
+        ),
       // Communication (popup)
       toolbarPopupButton(
         asset: 'assets/icons/remote_group.svg',
@@ -578,7 +580,7 @@ class _ViewCameraPageState extends State<ViewCameraPage>
               ],
             ),
           ),
-          if (isRecording) ...[
+          if (isRecording && !Platform.isIOS) ...[
             const SizedBox(width: 6),
             _buildRecordingBox(),
           ],
@@ -609,7 +611,7 @@ class _ViewCameraPageState extends State<ViewCameraPage>
             ],
           ),
         ),
-        if (isRecording) ...[
+        if (isRecording && !Platform.isIOS) ...[
           const SizedBox(height: 6),
           _buildRecordingBox(),
         ],
@@ -665,8 +667,8 @@ class _ViewCameraPageState extends State<ViewCameraPage>
   Widget _buildMiniButton(bool isPortrait) {
     return Positioned(
       left: 0,
-      top: isPortrait ? 8 : null,
-      bottom: isPortrait ? null : 8,
+      top: (isPortrait && !Platform.isIOS) ? 8 : null,
+      bottom: (isPortrait && !Platform.isIOS) ? null : 8,
       child: miniShowButton(onTap: () => _showBar.value = true),
     );
   }

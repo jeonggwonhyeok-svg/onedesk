@@ -6,6 +6,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:math';
+import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
 
@@ -18,12 +19,15 @@ import 'package:flutter_hbb/models/platform_model.dart';
 // Used for the wheel button and wheel scroll widgets
 const double _kSpaceToHorizontalEdge = 25;
 const double _wheelWidth = 50;
-const double _wheelHeight = 162;
+const double _wheelHeight = 192;
 // Used for the left/right button widgets
 const double _kSpaceToVerticalEdge = 15;
 const double _kSpaceBetweenLeftRightButtons = 40;
 const double _kLeftRightButtonWidth = 55;
 const double _kLeftRightButtonHeight = 40;
+// 실제 Stack 하단에서 위젯 하단까지 거리
+const double _kBottomOffset = 100;
+const double _kCenterToWidgetOffset = 125;
 const double _kBorderWidth = 1;
 final Color _kDefaultBorderColor = Colors.white.withOpacity(0.7);
 final Color _kDefaultColor = Colors.black.withOpacity(0.4);
@@ -46,6 +50,12 @@ class _FloatingMouseWidgetsState extends State<FloatingMouseWidgets> {
   InputModel get _inputModel => widget.ffi.inputModel;
   CursorModel get _cursorModel => widget.ffi.cursorModel;
   late final VirtualMouseMode _virtualMouseMode;
+  bool _isLeftBtnDown = false;
+  bool _isRightBtnDown = false;
+  final GlobalKey _leftBtnKey = GlobalKey();
+  final GlobalKey _rightBtnKey = GlobalKey();
+  Rect? _leftBtnBlockedRect;
+  Rect? _rightBtnBlockedRect;
 
   @override
   void initState() {
@@ -62,8 +72,43 @@ class _FloatingMouseWidgetsState extends State<FloatingMouseWidgets> {
     }
   }
 
+  void _updateBlockedRects() {
+    _updateBlockedRect(_leftBtnKey, _leftBtnBlockedRect, (rect) {
+      _leftBtnBlockedRect = rect;
+    });
+    _updateBlockedRect(_rightBtnKey, _rightBtnBlockedRect, (rect) {
+      _rightBtnBlockedRect = rect;
+    });
+  }
+
+  void _updateBlockedRect(
+      GlobalKey key, Rect? lastRect, void Function(Rect?) setRect) {
+    final context = key.currentContext;
+    if (context == null) return;
+    final renderBox = context.findRenderObject() as RenderBox?;
+    if (renderBox == null || !renderBox.attached) return;
+    final newRect = renderBox.localToGlobal(Offset.zero) & renderBox.size;
+    if (lastRect != null) {
+      _cursorModel.removeBlockedRect(lastRect);
+    }
+    _cursorModel.addBlockedRect(newRect);
+    setRect(newRect);
+  }
+
+  void _removeBlockedRects() {
+    if (_leftBtnBlockedRect != null) {
+      _cursorModel.removeBlockedRect(_leftBtnBlockedRect!);
+      _leftBtnBlockedRect = null;
+    }
+    if (_rightBtnBlockedRect != null) {
+      _cursorModel.removeBlockedRect(_rightBtnBlockedRect!);
+      _rightBtnBlockedRect = null;
+    }
+  }
+
   @override
   void dispose() {
+    _removeBlockedRects();
     _virtualMouseMode.removeListener(_onVirtualMouseModeChanged);
     super.dispose();
     _cursorModel.blockEvents = false;
@@ -76,25 +121,107 @@ class _FloatingMouseWidgetsState extends State<FloatingMouseWidgets> {
     if (!virtualMouseMode.showVirtualMouse) {
       return const Offstage();
     }
-    return Stack(
-      children: [
-        FloatingWheel(
-          inputModel: _inputModel,
-          cursorModel: _cursorModel,
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final stackWidth = constraints.maxWidth;
+        final stackHeight = constraints.maxHeight;
+        final isLandscape = stackWidth > stackHeight;
+        final offset = isLandscape ? _kCenterToWidgetOffset * 2.5 : _kCenterToWidgetOffset;
+        final centerX = stackWidth / 2;
+        final btnGap = 6.0;
+        final wheelLeft = centerX + offset;
+        final rightClickLeft = wheelLeft - btnGap - _kLeftRightButtonWidth;
+        final leftClickLeft = rightClickLeft - btnGap - _kLeftRightButtonWidth;
+        final btnTop = stackHeight - _kBottomOffset - _kLeftRightButtonWidth;
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) _updateBlockedRects();
+        });
+        return Stack(
+          children: [
+            FloatingWheel(
+              inputModel: _inputModel,
+              cursorModel: _cursorModel,
+              stackSize: Size(stackWidth, stackHeight),
+            ),
+            if (virtualMouseMode.showVirtualJoystick)
+              VirtualJoystick(
+                cursorModel: _cursorModel,
+                stackSize: Size(stackWidth, stackHeight),
+              ),
+            // 우클릭 버튼 - 스크롤 휠 바로 왼쪽
+            Positioned(
+              left: rightClickLeft,
+              top: btnTop,
+              child: _buildClickButton(false),
+            ),
+            // 좌클릭 버튼 - 우클릭 왼쪽
+            Positioned(
+              left: leftClickLeft,
+              top: btnTop,
+              child: _buildClickButton(true),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  Widget _buildClickButton(bool isLeft) {
+    final iconPath = isLeft
+        ? 'assets/icons/mouse-stick-left-click.png'
+        : 'assets/icons/mouse-stick-right-click.png';
+    final isDown = isLeft ? _isLeftBtnDown : _isRightBtnDown;
+    final key = isLeft ? _leftBtnKey : _rightBtnKey;
+    return Listener(
+      key: key,
+      onPointerDown: (_) {
+        setState(() {
+          if (isLeft) _isLeftBtnDown = true; else _isRightBtnDown = true;
+        });
+      },
+      onPointerUp: (_) async {
+        final btn = isLeft ? MouseButtons.left : MouseButtons.right;
+        await _cursorModel.syncCursorPosition();
+        await _inputModel.tapDown(btn);
+        await Future.delayed(const Duration(milliseconds: 50));
+        await _inputModel.tapUp(btn);
+        if (mounted) {
+          setState(() {
+            if (isLeft) _isLeftBtnDown = false; else _isRightBtnDown = false;
+          });
+        }
+      },
+      onPointerCancel: (_) {
+        setState(() {
+          if (isLeft) _isLeftBtnDown = false; else _isRightBtnDown = false;
+        });
+      },
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(12),
+        child: BackdropFilter(
+          filter: ui.ImageFilter.blur(sigmaX: 10, sigmaY: 10),
+          child: Container(
+            width: _kLeftRightButtonWidth,
+            height: _kLeftRightButtonWidth,
+            alignment: Alignment.center,
+            decoration: BoxDecoration(
+              color: const Color(0xFFFEFEFE).withOpacity(0.3),
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(
+                color: isDown
+                    ? _kTapDownColor
+                    : const Color(0xFFFFFFFF).withOpacity(0.3),
+                width: isDown ? 1.5 : 1,
+              ),
+            ),
+            child: Image.asset(
+              iconPath,
+              width: 28,
+              height: 28,
+            ),
+          ),
         ),
-        if (virtualMouseMode.showVirtualJoystick)
-          VirtualJoystick(cursorModel: _cursorModel),
-        FloatingLeftRightButton(
-          isLeft: true,
-          inputModel: _inputModel,
-          cursorModel: _cursorModel,
-        ),
-        FloatingLeftRightButton(
-          isLeft: false,
-          inputModel: _inputModel,
-          cursorModel: _cursorModel,
-        ),
-      ],
+      ),
     );
   }
 }
@@ -102,8 +229,9 @@ class _FloatingMouseWidgetsState extends State<FloatingMouseWidgets> {
 class FloatingWheel extends StatefulWidget {
   final InputModel inputModel;
   final CursorModel cursorModel;
+  final Size stackSize;
   const FloatingWheel(
-      {super.key, required this.inputModel, required this.cursorModel});
+      {super.key, required this.inputModel, required this.cursorModel, required this.stackSize});
 
   @override
   State<FloatingWheel> createState() => _FloatingWheelState();
@@ -118,8 +246,6 @@ class _FloatingWheelState extends State<FloatingWheel> {
   bool _isMidDown = false;
   bool _isDownDown = false;
 
-  Orientation? _previousOrientation;
-
   Timer? _scrollTimer;
 
   InputModel get _inputModel => widget.inputModel;
@@ -133,12 +259,23 @@ class _FloatingWheelState extends State<FloatingWheel> {
     });
   }
 
+  @override
+  void didUpdateWidget(FloatingWheel oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.stackSize != widget.stackSize) {
+      _resetPosition();
+    }
+  }
+
   void _resetPosition() {
-    final size = MediaQuery.of(context).size;
+    final w = widget.stackSize.width;
+    final h = widget.stackSize.height;
+    final isLandscape = w > h;
+    final offset = isLandscape ? _kCenterToWidgetOffset * 2.5 : _kCenterToWidgetOffset;
     setState(() {
       _position = Offset(
-        size.width - _wheelWidth - _kSpaceToHorizontalEdge,
-        (size.height - _wheelHeight) / 2,
+        w / 2 + offset,
+        h - _wheelHeight - _kBottomOffset,
       );
       _isInitialized = true;
     });
@@ -166,17 +303,6 @@ class _FloatingWheelState extends State<FloatingWheel> {
     super.dispose();
   }
 
-  @override
-  void didChangeDependencies() {
-    super.didChangeDependencies();
-    final currentOrientation = MediaQuery.of(context).orientation;
-    if (_previousOrientation != null &&
-        _previousOrientation != currentOrientation) {
-      _resetPosition();
-    }
-    _previousOrientation = currentOrientation;
-  }
-
   Widget _buildUpDownButton(
       void Function(PointerDownEvent) onPointerDown,
       void Function(PointerUpEvent) onPointerUp,
@@ -185,6 +311,7 @@ class _FloatingWheelState extends State<FloatingWheel> {
       BorderRadiusGeometry borderRadius,
       IconData iconData) {
     return Listener(
+      behavior: HitTestBehavior.opaque,
       onPointerDown: onPointerDown,
       onPointerUp: onPointerUp,
       onPointerCancel: onPointerCancel,
@@ -192,14 +319,11 @@ class _FloatingWheelState extends State<FloatingWheel> {
         width: _wheelWidth,
         height: 55,
         alignment: Alignment.center,
-        decoration: BoxDecoration(
-          color: _kDefaultColor,
-          border: Border.all(
-              color: flagGetter() ? _kTapDownColor : _kDefaultBorderColor,
-              width: 1),
-          borderRadius: borderRadius,
-        ),
-        child: Icon(iconData, color: _kDefaultBorderColor, size: 32),
+        child: Icon(iconData,
+            color: flagGetter()
+                ? _kTapDownColor
+                : const Color(0xFFF2F1F6),
+            size: 28),
       ),
     );
   }
@@ -216,121 +340,122 @@ class _FloatingWheelState extends State<FloatingWheel> {
     );
   }
 
+  Widget _buildDivider() {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 8),
+      child: Container(
+        height: 1,
+        color: const Color(0xFFF2F1F6),
+      ),
+    );
+  }
+
   Widget _buildWidget(BuildContext context) {
-    return Container(
-      width: _wheelWidth,
-      height: _wheelHeight,
-      child: Column(
-        children: [
-          _buildUpDownButton(
-            (event) {
-              setState(() {
-                _isUpDown = true;
-              });
-              _startScrollTimer(1);
-            },
-            (event) {
-              setState(() {
-                _isUpDown = false;
-              });
-              _stopScrollTimer();
-            },
-            (event) {
-              setState(() {
-                _isUpDown = false;
-              });
-              _stopScrollTimer();
-            },
-            () => _isUpDown,
-            BorderRadius.vertical(top: Radius.circular(_wheelWidth * 0.5)),
-            Icons.keyboard_arrow_up,
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(12),
+      child: BackdropFilter(
+        filter: ui.ImageFilter.blur(sigmaX: 10, sigmaY: 10),
+        child: Container(
+          width: _wheelWidth,
+          height: _wheelHeight,
+          decoration: BoxDecoration(
+            color: const Color(0xFFFEFEFE).withOpacity(0.3),
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(
+              color: const Color(0xFFFFFFFF).withOpacity(0.3),
+              width: 1,
+            ),
           ),
-          Listener(
-            onPointerDown: (event) {
-              setState(() {
-                _isMidDown = true;
-              });
-              _inputModel.tapDown(MouseButtons.wheel);
-            },
-            onPointerUp: (event) {
-              setState(() {
-                _isMidDown = false;
-              });
-              _inputModel.tapUp(MouseButtons.wheel);
-            },
-            onPointerCancel: (event) {
-              setState(() {
-                _isMidDown = false;
-              });
-              _inputModel.tapUp(MouseButtons.wheel);
-            },
-            child: Container(
-              width: _wheelWidth,
-              height: 52,
-              decoration: BoxDecoration(
-                color: _kDefaultColor,
-                border: Border.symmetric(
-                    vertical: BorderSide(
-                        color:
-                            _isMidDown ? _kTapDownColor : _kDefaultBorderColor,
-                        width: _kBorderWidth)),
+          child: Column(
+            children: [
+              _buildUpDownButton(
+                (event) {
+                  setState(() {
+                    _isUpDown = true;
+                  });
+                  _startScrollTimer(1);
+                },
+                (event) {
+                  setState(() {
+                    _isUpDown = false;
+                  });
+                  _stopScrollTimer();
+                },
+                (event) {
+                  setState(() {
+                    _isUpDown = false;
+                  });
+                  _stopScrollTimer();
+                },
+                () => _isUpDown,
+                BorderRadius.vertical(top: Radius.circular(12)),
+                Icons.keyboard_arrow_up,
               ),
-              child: Center(
+              _buildDivider(),
+              Listener(
+                behavior: HitTestBehavior.opaque,
+                onPointerDown: (event) {
+                  setState(() {
+                    _isMidDown = true;
+                  });
+                  _inputModel.tapDown(MouseButtons.wheel);
+                },
+                onPointerUp: (event) {
+                  setState(() {
+                    _isMidDown = false;
+                  });
+                  _inputModel.tapUp(MouseButtons.wheel);
+                },
+                onPointerCancel: (event) {
+                  setState(() {
+                    _isMidDown = false;
+                  });
+                  _inputModel.tapUp(MouseButtons.wheel);
+                },
                 child: Container(
-                  width: _wheelWidth - 10,
-                  height: _wheelWidth - 10,
+                  width: _wheelWidth,
+                  height: 80,
                   child: Center(
                     child: Column(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        Container(
-                          width: 18,
-                          height: 2,
-                          color: _kDefaultBorderColor,
-                        ),
-                        SizedBox(height: 6),
-                        Container(
-                          width: 24,
-                          height: 2,
-                          color: _kDefaultBorderColor,
-                        ),
-                        SizedBox(height: 6),
-                        Container(
-                          width: 18,
-                          height: 2,
-                          color: _kDefaultBorderColor,
-                        ),
+                        Container(width: 14, height: 1.5, color: _isMidDown ? _kTapDownColor : const Color(0xFFFEFEFE)),
+                        SizedBox(height: 5),
+                        Container(width: 20, height: 1.5, color: _isMidDown ? _kTapDownColor : const Color(0xFFFEFEFE)),
+                        SizedBox(height: 5),
+                        Container(width: 14, height: 1.5, color: _isMidDown ? _kTapDownColor : const Color(0xFFFEFEFE)),
                       ],
                     ),
                   ),
                 ),
               ),
-            ),
+              _buildDivider(),
+              _buildUpDownButton(
+                (event) {
+                  setState(() {
+                    _isDownDown = true;
+                  });
+                  _startScrollTimer(-1);
+                },
+                (event) {
+                  setState(() {
+                    _isDownDown = false;
+                  });
+                  _stopScrollTimer();
+                },
+                (event) {
+                  setState(() {
+                    _isDownDown = false;
+                  });
+                  _stopScrollTimer();
+                },
+                () => _isDownDown,
+                BorderRadius.vertical(bottom: Radius.circular(12)),
+                Icons.keyboard_arrow_down,
+              ),
+            ],
           ),
-          _buildUpDownButton(
-            (event) {
-              setState(() {
-                _isDownDown = true;
-              });
-              _startScrollTimer(-1);
-            },
-            (event) {
-              setState(() {
-                _isDownDown = false;
-              });
-              _stopScrollTimer();
-            },
-            (event) {
-              setState(() {
-                _isDownDown = false;
-              });
-              _stopScrollTimer();
-            },
-            () => _isDownDown,
-            BorderRadius.vertical(bottom: Radius.circular(_wheelWidth * 0.5)),
-            Icons.keyboard_arrow_down,
-          ),
-        ],
+        ),
       ),
     );
   }
@@ -459,8 +584,10 @@ class _FloatingLeftRightButtonState extends State<FloatingLeftRightButton> {
     final pos = _loadPositionFromString(ps);
     if (pos == null) {
       final size = MediaQuery.of(context).size;
+      final padding = MediaQuery.of(context).padding;
+      final availableHeight = size.height - padding.top - padding.bottom;
       _position = Offset(_getOffsetX(size.width),
-          size.height - _kSpaceToVerticalEdge - _kLeftRightButtonHeight);
+          availableHeight - _kSpaceToVerticalEdge - _kLeftRightButtonHeight);
     } else {
       _position = pos;
       _preSavedPos = pos;
@@ -490,11 +617,13 @@ class _FloatingLeftRightButtonState extends State<FloatingLeftRightButton> {
   void _onMoveUpdateDelta(Offset delta) {
     final context = this.context;
     final size = MediaQuery.of(context).size;
+    final padding = MediaQuery.of(context).padding;
+    final availableHeight = size.height - padding.top - padding.bottom;
     Offset newPosition = _position + delta;
     double minX = _kSpaceToHorizontalEdge;
     double minY = _kSpaceToVerticalEdge;
     double maxX = size.width - _kLeftRightButtonWidth - _kSpaceToHorizontalEdge;
-    double maxY = size.height - _kLeftRightButtonHeight - _kSpaceToVerticalEdge;
+    double maxY = availableHeight - _kLeftRightButtonHeight - _kSpaceToVerticalEdge;
     newPosition = Offset(
       newPosition.dx.clamp(minX, maxX),
       newPosition.dy.clamp(minY, maxY),
@@ -556,14 +685,15 @@ class _FloatingLeftRightButtonState extends State<FloatingLeftRightButton> {
   @override
   Widget build(BuildContext context) {
     if (!_isInitialized) {
-      return Positioned(child: Offstage());
+      return const SizedBox.shrink();
     }
-    return Positioned(
-      left: _position.dx,
-      top: _position.dy,
-      // We can't use the GestureDetector here, because `onTapDown` may be
-      // triggered sometimes when dragging.
-      child: Listener(
+    return SizedBox.expand(
+      child: Stack(
+        children: [
+          Positioned(
+            left: _position.dx,
+            top: _position.dy,
+            child: Listener(
         onPointerMove: _onBodyPointerMoveUpdate,
         onPointerDown: (event) async {
           _isDragging = false;
@@ -646,6 +776,9 @@ class _FloatingLeftRightButtonState extends State<FloatingLeftRightButton> {
           child: _buildButtonIcon(),
         ),
       ),
+          ),
+        ],
+      ),
     );
   }
 }
@@ -678,8 +811,9 @@ class _QuarterCirclePainter extends CustomPainter {
 // Maybe we need to change it to relative movement in the future.
 class VirtualJoystick extends StatefulWidget {
   final CursorModel cursorModel;
+  final Size stackSize;
 
-  const VirtualJoystick({super.key, required this.cursorModel});
+  const VirtualJoystick({super.key, required this.cursorModel, required this.stackSize});
 
   @override
   State<VirtualJoystick> createState() => _VirtualJoystickState();
@@ -698,7 +832,6 @@ class _VirtualJoystickState extends State<VirtualJoystick> {
   Timer? _dragStartTimer;
   // Periodic timer for continuous movement
   Timer? _continuousMoveTimer;
-  Size? _lastScreenSize;
   bool _isPressed = false;
 
   @override
@@ -706,7 +839,6 @@ class _VirtualJoystickState extends State<VirtualJoystick> {
     super.initState();
     widget.cursorModel.blockEvents = false;
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      _lastScreenSize = MediaQuery.of(context).size;
       _resetPosition();
     });
   }
@@ -719,21 +851,22 @@ class _VirtualJoystickState extends State<VirtualJoystick> {
   }
 
   @override
-  void didChangeDependencies() {
-    super.didChangeDependencies();
-    final currentScreenSize = MediaQuery.of(context).size;
-    if (_lastScreenSize != null && _lastScreenSize != currentScreenSize) {
+  void didUpdateWidget(VirtualJoystick oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.stackSize != widget.stackSize) {
       _resetPosition();
     }
-    _lastScreenSize = currentScreenSize;
   }
 
   void _resetPosition() {
-    final size = MediaQuery.of(context).size;
+    final w = widget.stackSize.width;
+    final h = widget.stackSize.height;
+    final isLandscape = w > h;
+    final offset = isLandscape ? _kCenterToWidgetOffset * 2.5 : _kCenterToWidgetOffset;
     setState(() {
       _position = Offset(
-        _kSpaceToHorizontalEdge + _joystickRadius,
-        size.height * 0.5 + _joystickRadius * 1.5,
+        w / 2 - offset,
+        h - _kBottomOffset - _wheelHeight / 2,
       );
       _isInitialized = true;
     });
@@ -807,10 +940,46 @@ class _VirtualJoystickState extends State<VirtualJoystick> {
           //    If it was a drag, this stops the continuous movement.
           _stopSendEventTimer();
         },
-        child: CustomPaint(
-          size: Size(_joystickRadius * 2, _joystickRadius * 2),
-          painter: _JoystickPainter(
-              _offset, _joystickRadius, _thumbRadius, _isPressed),
+        child: SizedBox(
+          width: _joystickRadius * 2,
+          height: _joystickRadius * 2,
+          child: Stack(
+            children: [
+              // Glass base circle
+              ClipOval(
+                child: BackdropFilter(
+                  filter: ui.ImageFilter.blur(sigmaX: 10, sigmaY: 10),
+                  child: Container(
+                    width: _joystickRadius * 2,
+                    height: _joystickRadius * 2,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      color: const Color(0xFFFEFEFE).withOpacity(0.3),
+                      border: Border.all(
+                        color: _isPressed
+                            ? _kTapDownColor
+                            : const Color(0xFFFFFFFF).withOpacity(0.3),
+                        width: 1,
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+              // Thumb
+              Positioned(
+                left: _joystickRadius + _offset.dx - _thumbRadius,
+                top: _joystickRadius + _offset.dy - _thumbRadius,
+                child: Container(
+                  width: _thumbRadius * 2,
+                  height: _thumbRadius * 2,
+                  decoration: const BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: Color(0xFFFEFEFE),
+                  ),
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );
@@ -834,47 +1003,3 @@ class _VirtualJoystickState extends State<VirtualJoystick> {
   }
 }
 
-class _JoystickPainter extends CustomPainter {
-  final Offset _offset;
-  final double _joystickRadius;
-  final double _thumbRadius;
-  final bool _isPressed;
-
-  _JoystickPainter(
-      this._offset, this._joystickRadius, this._thumbRadius, this._isPressed);
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final center = Offset(size.width / 2, size.height / 2);
-    final joystickColor = _kDefaultColor;
-    final borderColor = _isPressed ? _kTapDownColor : _kDefaultBorderColor;
-    final thumbColor = _kWidgetHighlightColor;
-
-    final joystickPaint = Paint()
-      ..color = joystickColor
-      ..style = PaintingStyle.fill;
-
-    final borderPaint = Paint()
-      ..color = borderColor
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 1.5;
-
-    final thumbPaint = Paint()
-      ..color = thumbColor
-      ..style = PaintingStyle.fill;
-
-    // Draw joystick base and border
-    canvas.drawCircle(center, _joystickRadius, joystickPaint);
-    canvas.drawCircle(center, _joystickRadius, borderPaint);
-
-    // Draw thumb
-    final thumbCenter = center + _offset;
-    canvas.drawCircle(thumbCenter, _thumbRadius, thumbPaint);
-  }
-
-  @override
-  bool shouldRepaint(covariant _JoystickPainter oldDelegate) {
-    return oldDelegate._offset != _offset ||
-        oldDelegate._isPressed != _isPressed;
-  }
-}

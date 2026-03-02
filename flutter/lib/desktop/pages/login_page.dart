@@ -30,6 +30,9 @@ final _emailRegex = RegExp(r'^[^@\s]+@[^@\s]+\.[^@\s]+$');
 /// 비밀번호 변경 완료 메시지 표시 플래그 (전역)
 final showPasswordChangedCompletion = false.obs;
 
+/// 업데이트 필요 플래그 (전역) - 버전이 다르면 로그인 비활성화
+final updateRequired = false.obs;
+
 /// 로그인 페이지
 class LoginPage extends StatefulWidget {
   final VoidCallback onLoginSuccess;
@@ -49,6 +52,7 @@ class _LoginPageState extends State<LoginPage> {
   String? _passwordError;
   bool _isInProgress = false;
   bool _obscurePassword = true;
+  bool _autoLogin = false;
   BuildContext? _loginDialogContext;
 
   void _showLoginLoadingDialog() {
@@ -105,7 +109,31 @@ class _LoginPageState extends State<LoginPage> {
                     color: primaryColor,
                   ),
                 ),
-                const SizedBox(height: 24),
+                const SizedBox(height: 32),
+                SizedBox(
+                  width: double.infinity,
+                  child: ElevatedButton(
+                    onPressed: () {
+                      _hideLoginLoadingDialog();
+                      setState(() => _isInProgress = false);
+                    },
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: primaryColor,
+                      padding: const EdgeInsets.symmetric(vertical: 14),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                    ),
+                    child: Text(
+                      translate('Cancel'),
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 15,
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 16),
               ],
             ),
           ),
@@ -124,6 +152,7 @@ class _LoginPageState extends State<LoginPage> {
   @override
   void initState() {
     super.initState();
+    _autoLogin = bind.mainGetLocalOption(key: 'auto_login') == 'Y';
     Timer(const Duration(milliseconds: 100), () {
       if (mounted) _emailFocusNode.requestFocus();
     });
@@ -140,7 +169,7 @@ class _LoginPageState extends State<LoginPage> {
   Future<void> _onLogin() async {
     // 유효성 검사
     if (_emailController.text.isEmpty) {
-      setState(() => _emailError = translate('Please enter your email'));
+      setState(() => _emailError = translate('Enter your email'));
       return;
     }
     if (!_emailRegex.hasMatch(_emailController.text)) {
@@ -148,7 +177,7 @@ class _LoginPageState extends State<LoginPage> {
       return;
     }
     if (_passwordController.text.isEmpty) {
-      setState(() => _passwordError = translate('Password missed'));
+      setState(() => _passwordError = translate('Enter your password'));
       return;
     }
 
@@ -171,8 +200,7 @@ class _LoginPageState extends State<LoginPage> {
       if (!loginRes.success) {
         _hideLoginLoadingDialog();
         setState(() {
-          _passwordError =
-              translate('Login failed. Please check your credentials.');
+          _passwordError = translate('Bad Request');
           _isInProgress = false;
         });
         return;
@@ -183,7 +211,7 @@ class _LoginPageState extends State<LoginPage> {
       if (!meRes.success || meRes.data == null) {
         _hideLoginLoadingDialog();
         setState(() {
-          _passwordError = translate('Failed to get user info');
+          _passwordError = translate('Bad Request');
           _isInProgress = false;
         });
         return;
@@ -202,7 +230,7 @@ class _LoginPageState extends State<LoginPage> {
       if (!registerRes.success) {
         _hideLoginLoadingDialog();
         setState(() {
-          _passwordError = translate('Failed to register session');
+          _passwordError = translate('Bad Request');
           _isInProgress = false;
         });
         return;
@@ -217,8 +245,7 @@ class _LoginPageState extends State<LoginPage> {
       if (!activateRes.success) {
         _hideLoginLoadingDialog();
         setState(() {
-          _passwordError =
-              '${translate('Failed to activate session')}: ${activateRes.message ?? activateRes.rawBody}';
+          _passwordError = translate('Bad Request');
           _isInProgress = false;
         });
         return;
@@ -234,7 +261,7 @@ class _LoginPageState extends State<LoginPage> {
     } catch (e) {
       _hideLoginLoadingDialog();
       setState(() {
-        _passwordError = e.toString();
+        _passwordError = translate('Bad Request');
         _isInProgress = false;
       });
     }
@@ -251,7 +278,7 @@ class _LoginPageState extends State<LoginPage> {
         if (!isGoogleAuthServiceInitialized()) {
           _hideLoginLoadingDialog();
           setState(() {
-            _passwordError = translate('Google login not available');
+            _passwordError = translate('Bad Request');
             _isInProgress = false;
           });
           return;
@@ -263,7 +290,7 @@ class _LoginPageState extends State<LoginPage> {
         if (!result.success) {
           _hideLoginLoadingDialog();
           setState(() {
-            _passwordError = result.error ?? translate('Google login failed');
+            _passwordError = translate('Bad Request');
             _isInProgress = false;
           });
           return;
@@ -276,7 +303,7 @@ class _LoginPageState extends State<LoginPage> {
         } else {
           _hideLoginLoadingDialog();
           setState(() {
-            _passwordError = translate('Failed to get user info');
+            _passwordError = translate('Bad Request');
             _isInProgress = false;
           });
         }
@@ -285,7 +312,7 @@ class _LoginPageState extends State<LoginPage> {
         if (!isMobileGoogleAuthServiceInitialized()) {
           _hideLoginLoadingDialog();
           setState(() {
-            _passwordError = translate('Google login not available');
+            _passwordError = translate('Bad Request');
             _isInProgress = false;
           });
           return;
@@ -297,7 +324,7 @@ class _LoginPageState extends State<LoginPage> {
         if (!result.success) {
           _hideLoginLoadingDialog();
           setState(() {
-            _passwordError = result.error ?? translate('Google login failed');
+            _passwordError = translate('Bad Request');
             _isInProgress = false;
           });
           return;
@@ -310,7 +337,7 @@ class _LoginPageState extends State<LoginPage> {
         } else {
           _hideLoginLoadingDialog();
           setState(() {
-            _passwordError = translate('Failed to get user info');
+            _passwordError = translate('Bad Request');
             _isInProgress = false;
           });
         }
@@ -318,7 +345,7 @@ class _LoginPageState extends State<LoginPage> {
     } catch (e) {
       _hideLoginLoadingDialog();
       setState(() {
-        _passwordError = e.toString();
+        _passwordError = translate('Bad Request');
         _isInProgress = false;
       });
     }
@@ -334,7 +361,7 @@ class _LoginPageState extends State<LoginPage> {
         if (!isKakaoAuthServiceInitialized()) {
           _hideLoginLoadingDialog();
           setState(() {
-            _passwordError = translate('Kakao login not available');
+            _passwordError = translate('Bad Request');
             _isInProgress = false;
           });
           return;
@@ -346,7 +373,7 @@ class _LoginPageState extends State<LoginPage> {
         if (!result.success) {
           _hideLoginLoadingDialog();
           setState(() {
-            _passwordError = result.error ?? translate('Kakao login failed');
+            _passwordError = translate('Bad Request');
             _isInProgress = false;
           });
           return;
@@ -359,7 +386,7 @@ class _LoginPageState extends State<LoginPage> {
         } else {
           _hideLoginLoadingDialog();
           setState(() {
-            _passwordError = translate('Failed to get user info');
+            _passwordError = translate('Bad Request');
             _isInProgress = false;
           });
         }
@@ -368,7 +395,7 @@ class _LoginPageState extends State<LoginPage> {
         if (!isMobileKakaoAuthServiceInitialized()) {
           _hideLoginLoadingDialog();
           setState(() {
-            _passwordError = translate('Kakao login not available');
+            _passwordError = translate('Bad Request');
             _isInProgress = false;
           });
           return;
@@ -380,7 +407,7 @@ class _LoginPageState extends State<LoginPage> {
         if (!result.success) {
           _hideLoginLoadingDialog();
           setState(() {
-            _passwordError = result.error ?? translate('Kakao login failed');
+            _passwordError = translate('Bad Request');
             _isInProgress = false;
           });
           return;
@@ -393,7 +420,7 @@ class _LoginPageState extends State<LoginPage> {
         } else {
           _hideLoginLoadingDialog();
           setState(() {
-            _passwordError = translate('Failed to get user info');
+            _passwordError = translate('Bad Request');
             _isInProgress = false;
           });
         }
@@ -401,7 +428,7 @@ class _LoginPageState extends State<LoginPage> {
     } catch (e) {
       _hideLoginLoadingDialog();
       setState(() {
-        _passwordError = e.toString();
+        _passwordError = translate('Bad Request');
         _isInProgress = false;
       });
     }
@@ -417,7 +444,7 @@ class _LoginPageState extends State<LoginPage> {
         if (!isNaverAuthServiceInitialized()) {
           _hideLoginLoadingDialog();
           setState(() {
-            _passwordError = translate('Naver login not available');
+            _passwordError = translate('Bad Request');
             _isInProgress = false;
           });
           return;
@@ -429,7 +456,7 @@ class _LoginPageState extends State<LoginPage> {
         if (!result.success) {
           _hideLoginLoadingDialog();
           setState(() {
-            _passwordError = result.error ?? translate('Naver login failed');
+            _passwordError = translate('Bad Request');
             _isInProgress = false;
           });
           return;
@@ -442,7 +469,7 @@ class _LoginPageState extends State<LoginPage> {
         } else {
           _hideLoginLoadingDialog();
           setState(() {
-            _passwordError = translate('Failed to get user info');
+            _passwordError = translate('Bad Request');
             _isInProgress = false;
           });
         }
@@ -451,7 +478,7 @@ class _LoginPageState extends State<LoginPage> {
         if (!isMobileNaverAuthServiceInitialized()) {
           _hideLoginLoadingDialog();
           setState(() {
-            _passwordError = translate('Naver login not available');
+            _passwordError = translate('Bad Request');
             _isInProgress = false;
           });
           return;
@@ -463,7 +490,7 @@ class _LoginPageState extends State<LoginPage> {
         if (!result.success) {
           _hideLoginLoadingDialog();
           setState(() {
-            _passwordError = result.error ?? translate('Naver login failed');
+            _passwordError = translate('Bad Request');
             _isInProgress = false;
           });
           return;
@@ -476,7 +503,7 @@ class _LoginPageState extends State<LoginPage> {
         } else {
           _hideLoginLoadingDialog();
           setState(() {
-            _passwordError = translate('Failed to get user info');
+            _passwordError = translate('Bad Request');
             _isInProgress = false;
           });
         }
@@ -484,7 +511,7 @@ class _LoginPageState extends State<LoginPage> {
     } catch (e) {
       _hideLoginLoadingDialog();
       setState(() {
-        _passwordError = e.toString();
+        _passwordError = translate('Bad Request');
         _isInProgress = false;
       });
     }
@@ -525,6 +552,16 @@ class _LoginPageState extends State<LoginPage> {
   @override
   Widget build(BuildContext context) {
     return Obx(() {
+      // 업데이트 필요 시 로그인 비활성화
+      if (updateRequired.value) {
+        if (!isDesktop) {
+          return _buildMobileUpdateRequiredUI();
+        }
+        return AuthPageLayout(
+          formContent: _buildUpdateRequiredContent(),
+        );
+      }
+
       // 비밀번호 변경 완료 메시지 표시
       if (showPasswordChangedCompletion.value) {
         return AuthPageLayout(
@@ -682,7 +719,36 @@ class _LoginPageState extends State<LoginPage> {
           },
           onSubmitted: (_) => _onLogin(),
         ),
-        const SizedBox(height: 25),
+        const SizedBox(height: 16),
+        // 자동 로그인 체크박스
+        GestureDetector(
+          onTap: () {
+            setState(() => _autoLogin = !_autoLogin);
+            bind.mainSetLocalOption(key: 'auto_login', value: _autoLogin ? 'Y' : '');
+          },
+          child: Row(
+            children: [
+              StyledCheckbox(
+                value: _autoLogin,
+                onChanged: (v) {
+                  setState(() => _autoLogin = v ?? false);
+                  bind.mainSetLocalOption(key: 'auto_login', value: _autoLogin ? 'Y' : '');
+                },
+                size: 20,
+                iconSize: 14,
+              ),
+              const SizedBox(width: 8),
+              Text(
+                translate('Auto Login'),
+                style: const TextStyle(
+                  fontSize: 14,
+                  color: Colors.black87,
+                ),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 16),
         Row(
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
@@ -745,6 +811,61 @@ class _LoginPageState extends State<LoginPage> {
           isInProgress: _isInProgress,
         ),
       ],
+    );
+  }
+
+  /// 업데이트 필요 UI (데스크톱)
+  Widget _buildUpdateRequiredContent() {
+    return Column(
+      mainAxisAlignment: MainAxisAlignment.center,
+      children: [
+        const Icon(
+          Icons.system_update,
+          size: 80,
+          color: Color(0xFF5F71FF),
+        ),
+        const SizedBox(height: 32),
+        Text(
+          translate('Can use on update'),
+          textAlign: TextAlign.center,
+          style: const TextStyle(
+            fontSize: 16,
+            fontWeight: FontWeight.bold,
+            color: Colors.black87,
+          ),
+        ),
+      ],
+    );
+  }
+
+  /// 업데이트 필요 UI (모바일)
+  Widget _buildMobileUpdateRequiredUI() {
+    return Scaffold(
+      backgroundColor: Colors.white,
+      body: SafeArea(
+        child: Center(
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              const Icon(
+                Icons.system_update,
+                size: 80,
+                color: Color(0xFF5F71FF),
+              ),
+              const SizedBox(height: 32),
+              Text(
+                translate('Can use on update'),
+                textAlign: TextAlign.center,
+                style: const TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.bold,
+                  color: Colors.black87,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
     );
   }
 
@@ -907,7 +1028,31 @@ class _MobileIdLoginPageState extends State<_MobileIdLoginPage> {
                     color: primaryColor,
                   ),
                 ),
-                const SizedBox(height: 24),
+                const SizedBox(height: 32),
+                SizedBox(
+                  width: double.infinity,
+                  child: ElevatedButton(
+                    onPressed: () {
+                      _hideLoginLoadingDialog();
+                      setState(() => _isInProgress = false);
+                    },
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: primaryColor,
+                      padding: const EdgeInsets.symmetric(vertical: 14),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                    ),
+                    child: Text(
+                      translate('Cancel'),
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 15,
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 16),
               ],
             ),
           ),
@@ -924,6 +1069,12 @@ class _MobileIdLoginPageState extends State<_MobileIdLoginPage> {
   }
 
   @override
+  void initState() {
+    super.initState();
+    _autoLogin = bind.mainGetLocalOption(key: 'auto_login') == 'Y';
+  }
+
+  @override
   void dispose() {
     _emailController.dispose();
     _passwordController.dispose();
@@ -934,7 +1085,7 @@ class _MobileIdLoginPageState extends State<_MobileIdLoginPage> {
     // 유효성 검사
     final emailRegex = RegExp(r'^[^@\s]+@[^@\s]+\.[^@\s]+$');
     if (_emailController.text.isEmpty) {
-      setState(() => _emailError = translate('Please enter your email'));
+      setState(() => _emailError = translate('Enter your email'));
       return;
     }
     if (!emailRegex.hasMatch(_emailController.text)) {
@@ -942,7 +1093,7 @@ class _MobileIdLoginPageState extends State<_MobileIdLoginPage> {
       return;
     }
     if (_passwordController.text.isEmpty) {
-      setState(() => _passwordError = translate('Password missed'));
+      setState(() => _passwordError = translate('Enter your password'));
       return;
     }
 
@@ -965,8 +1116,7 @@ class _MobileIdLoginPageState extends State<_MobileIdLoginPage> {
       if (!loginRes.success) {
         _hideLoginLoadingDialog();
         setState(() {
-          _passwordError =
-              translate('Login failed. Please check your credentials.');
+          _passwordError = translate('Login failed. Please check your credentials.');
           _isInProgress = false;
         });
         return;
@@ -977,7 +1127,7 @@ class _MobileIdLoginPageState extends State<_MobileIdLoginPage> {
       if (!meRes.success || meRes.data == null) {
         _hideLoginLoadingDialog();
         setState(() {
-          _passwordError = translate('Failed to get user info');
+          _passwordError = translate('Bad Request');
           _isInProgress = false;
         });
         return;
@@ -996,7 +1146,7 @@ class _MobileIdLoginPageState extends State<_MobileIdLoginPage> {
       if (!registerRes.success) {
         _hideLoginLoadingDialog();
         setState(() {
-          _passwordError = translate('Failed to register session');
+          _passwordError = translate('Bad Request');
           _isInProgress = false;
         });
         return;
@@ -1011,8 +1161,7 @@ class _MobileIdLoginPageState extends State<_MobileIdLoginPage> {
       if (!activateRes.success) {
         _hideLoginLoadingDialog();
         setState(() {
-          _passwordError =
-              '${translate('Failed to activate session')}: ${activateRes.message ?? activateRes.rawBody}';
+          _passwordError = translate('Bad Request');
           _isInProgress = false;
         });
         return;
@@ -1032,7 +1181,7 @@ class _MobileIdLoginPageState extends State<_MobileIdLoginPage> {
     } catch (e) {
       _hideLoginLoadingDialog();
       setState(() {
-        _passwordError = e.toString();
+        _passwordError = translate('Bad Request');
         _isInProgress = false;
       });
     }
@@ -1070,10 +1219,56 @@ class _MobileIdLoginPageState extends State<_MobileIdLoginPage> {
     );
   }
 
+  /// 헤더 위젯 (뒤로가기 + 타이틀)
+  /// 데스크탑: 중앙 정렬 + chevron_left, 모바일: 좌측 정렬 + arrow_back_ios
+  Widget _buildHeader(String title, VoidCallback onBack) {
+    if (isDesktop) {
+      return Stack(
+        alignment: Alignment.center,
+        children: [
+          Align(
+            alignment: Alignment.centerLeft,
+            child: IconButton(
+              onPressed: onBack,
+              icon: const Icon(Icons.chevron_left, size: 20),
+              padding: EdgeInsets.zero,
+              constraints: const BoxConstraints(),
+            ),
+          ),
+          Text(
+            title,
+            style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w600),
+          ),
+        ],
+      );
+    }
+    // 모바일: 좌측 정렬
+    return Row(
+      children: [
+        IconButton(
+          onPressed: onBack,
+          icon: const Icon(Icons.arrow_back_ios, color: Color(0xFF454447), size: 20),
+          padding: EdgeInsets.zero,
+          constraints: const BoxConstraints(),
+        ),
+        const SizedBox(width: 4),
+        Text(
+          title,
+          style: const TextStyle(
+            color: Color(0xFF454447),
+            fontSize: 18,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+      ],
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: Colors.white,
+      resizeToAvoidBottomInset: true,
       body: SafeArea(
         child: Padding(
           padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
@@ -1082,26 +1277,8 @@ class _MobileIdLoginPageState extends State<_MobileIdLoginPage> {
             children: [
               // 상단 여백
               const SizedBox(height: 8),
-              // 헤더 (버튼 왼쪽, 텍스트 가운데) - 데스크톱 비밀번호 찾기와 동일
-              Stack(
-                alignment: Alignment.center,
-                children: [
-                  Align(
-                    alignment: Alignment.centerLeft,
-                    child: IconButton(
-                      onPressed: () => Navigator.of(context).pop(),
-                      icon: const Icon(Icons.chevron_left, size: 20),
-                      padding: EdgeInsets.zero,
-                      constraints: const BoxConstraints(),
-                    ),
-                  ),
-                  Text(
-                    translate('Login'),
-                    style: const TextStyle(
-                        fontSize: 18, fontWeight: FontWeight.w600),
-                  ),
-                ],
-              ),
+              // 헤더 (뒤로가기 + 타이틀)
+              _buildHeader(translate('Login'), () => Navigator.of(context).pop()),
               // 폼 영역 (수직 가운데 정렬)
               Expanded(
                 child: Center(
@@ -1168,13 +1345,18 @@ class _MobileIdLoginPageState extends State<_MobileIdLoginPage> {
                         const SizedBox(height: 16),
                         // 자동 로그인 체크박스 (StyledCheckbox 사용)
                         GestureDetector(
-                          onTap: () => setState(() => _autoLogin = !_autoLogin),
+                          onTap: () {
+                            setState(() => _autoLogin = !_autoLogin);
+                            bind.mainSetLocalOption(key: 'auto_login', value: _autoLogin ? 'Y' : '');
+                          },
                           child: Row(
                             children: [
                               StyledCheckbox(
                                 value: _autoLogin,
-                                onChanged: (v) =>
-                                    setState(() => _autoLogin = v ?? false),
+                                onChanged: (v) {
+                                  setState(() => _autoLogin = v ?? false);
+                                  bind.mainSetLocalOption(key: 'auto_login', value: _autoLogin ? 'Y' : '');
+                                },
                                 size: 20,
                                 iconSize: 14,
                               ),

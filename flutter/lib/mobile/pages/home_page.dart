@@ -1,3 +1,4 @@
+import 'dart:io' show Platform;
 import 'package:flutter/material.dart';
 import 'package:flutter_hbb/mobile/pages/server_page.dart';
 import 'package:flutter_hbb/mobile/pages/settings_page.dart';
@@ -25,12 +26,12 @@ abstract class PageShape extends Widget {
 class _NavItem {
   final String iconPath;
   final String label;
-  final Widget page;
+  final Widget Function() pageBuilder;
 
   const _NavItem({
     required this.iconPath,
     required this.label,
-    required this.page,
+    required this.pageBuilder,
   });
 }
 
@@ -73,9 +74,9 @@ class HomePageState extends State<HomePage> {
 
   /// Get appBarActions for current page
   List<Widget> _getAppBarActions() {
-    final currentPage = _navItems[_selectedIndex].page;
-    if (currentPage is ServerPage) {
-      return currentPage.appBarActions;
+    // ServerPage의 경우에만 appBarActions 반환
+    if (_selectedIndex == 1 && !Platform.isIOS) {
+      return ServerPage().appBarActions;
     }
     return [];
   }
@@ -85,17 +86,18 @@ class HomePageState extends State<HomePage> {
       _NavItem(
         iconPath: 'assets/icons/mobile-menu-home.svg',
         label: translate('Home'),
-        page: ConnectionPage(appBarActions: []),
+        pageBuilder: () => ConnectionPage(appBarActions: []),
       ),
-      _NavItem(
-        iconPath: 'assets/icons/mobile-menu-screen-connection.svg',
-        label: translate('Share screen'),
-        page: ServerPage(),
-      ),
+      if (!Platform.isIOS)
+        _NavItem(
+          iconPath: 'assets/icons/mobile-menu-screen-connection.svg',
+          label: translate('Share screen'),
+          pageBuilder: () => ServerPage(),
+        ),
       _NavItem(
         iconPath: 'assets/icons/mobile-menu-mypage.svg',
         label: translate('My Page'),
-        page: MobileMyPage(),
+        pageBuilder: () => MobileMyPage(),
       ),
     ];
   }
@@ -116,12 +118,11 @@ class HomePageState extends State<HomePage> {
 
   @override
   Widget build(BuildContext context) {
-    // ConnectionPage(index 0)일 때만 커스텀 헤더 사용
-    final isConnectionPage = _selectedIndex == 0;
-    // ServerPage(index 1)는 화면 공유 헤더
-    final isServerPage = _selectedIndex == 1;
-    // MyPage(index 2)는 앱바 없음
-    final isMyPage = _selectedIndex == 2;
+    // 매 빌드마다 페이지를 새로 생성하여 회전 시 레이아웃이 올바르게 재계산되도록 함
+    final currentPage = _navItems[_selectedIndex].pageBuilder();
+    final isConnectionPage = currentPage is ConnectionPage;
+    final isServerPage = currentPage is ServerPage;
+    final isMyPage = currentPage is MobileMyPage;
 
     return WillPopScope(
         onWillPop: () async {
@@ -161,12 +162,12 @@ class HomePageState extends State<HomePage> {
                     const SizedBox(height: 20),
                     _buildWelcomeMessage(),
                     const SizedBox(height: 20),
-                    Expanded(child: _navItems[_selectedIndex].page),
+                    Expanded(child: currentPage),
                   ],
                 )
               : isMyPage
-                  ? SafeArea(child: _navItems[_selectedIndex].page)
-                  : _navItems[_selectedIndex].page,
+                  ? SafeArea(child: currentPage)
+                  : currentPage,
         ));
   }
 

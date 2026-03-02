@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:io' show Platform;
 import 'dart:math';
 
 import 'package:flutter/material.dart';
@@ -95,6 +96,7 @@ class _RawTouchGestureDetectorRegionState
 
   // Workaround tap down event when two fingers are used to scale(mobile)
   TapDownDetails? _lastTapDownDetails;
+  bool _tapHandledByTapUp = false;
 
   PointerDeviceKind? lastDeviceKind;
 
@@ -151,6 +153,7 @@ class _RawTouchGestureDetectorRegionState
   onTapUp(TapUpDetails d) async {
     final TapDownDetails? lastTapDownDetails = _lastTapDownDetails;
     _lastTapDownDetails = null;
+    _tapHandledByTapUp = false;
     if (isNotTouchBasedDevice()) {
       return;
     }
@@ -158,6 +161,7 @@ class _RawTouchGestureDetectorRegionState
       final isMoved =
           await ffi.cursorModel.move(d.localPosition.dx, d.localPosition.dy);
       if (isMoved) {
+        _tapHandledByTapUp = true;
         if (lastTapDownDetails != null) {
           await inputModel.tapDown(MouseButtons.left);
         }
@@ -177,6 +181,11 @@ class _RawTouchGestureDetectorRegionState
         return;
       }
       // Mobile, "Mouse mode"
+      await inputModel.tap(MouseButtons.left);
+    } else if (!_tapHandledByTapUp) {
+      // Touch mode fallback: onTapUp의 move()가 실패했을 때 현재 커서 위치에서 탭 전송
+      // FloatingMouse 버튼 영역에서 탭한 경우 중복 클릭 방지
+      if (ffi.cursorModel.lastIsBlocked) return;
       await inputModel.tap(MouseButtons.left);
     }
   }
@@ -228,9 +237,13 @@ class _RawTouchGestureDetectorRegionState
       }
       _cacheLongPressPositionTs = DateTime.now().millisecondsSinceEpoch;
       if (ffiModel.isPeerMobile) {
-        await ffi.cursorModel
-            .move(_cacheLongPressPosition.dx, _cacheLongPressPosition.dy);
-        await inputModel.tapDown(MouseButtons.left);
+        // iOS에서는 제스처 판별 전에 tapDown을 보내면 Android가 길게누르기로 인식함
+        // 제스처가 확정된 후에만 이벤트를 보내도록 함 (onLongPress, onTapUp, oneFingerPanStart에서 처리)
+        if (!Platform.isIOS) {
+          await ffi.cursorModel
+              .move(_cacheLongPressPosition.dx, _cacheLongPressPosition.dy);
+          await inputModel.tapDown(MouseButtons.left);
+        }
       }
     } else {
       _lastTapDownPositionForMouseMode = d.localPosition;
@@ -265,9 +278,12 @@ class _RawTouchGestureDetectorRegionState
       }
       await inputModel.tap(MouseButtons.right);
     } else {
-      // It's better to send a message to tell the controlled device that the long press event is triggered.
-      // We're now using a `TimerTask` in `InputService.kt` to decide whether to trigger the long press event.
-      // It's not accurate and it's better to use the same detection logic in the controlling side.
+      // iOS: onLongPressDown에서 tapDown을 보내지 않았으므로 여기서 보냄
+      if (Platform.isIOS) {
+        await ffi.cursorModel
+            .move(_cacheLongPressPosition.dx, _cacheLongPressPosition.dy);
+        await inputModel.tapDown(MouseButtons.left);
+      }
     }
   }
 

@@ -138,6 +138,7 @@ tauri-winrt-notification = "0.1"
 runas = "1.2"
 
 [target.'cfg(target_os = "macos")'.dependencies]
+libc = "0.2"
 objc = "0.2"
 cocoa = "0.24"
 dispatch = "0.2"
@@ -223,6 +224,9 @@ name = "OneDesk"
 identifier = "com.carriez.onedesk"
 icon = ["res/32x32.png", "res/128x128.png", "res/128x128@2x.png"]
 osx_minimum_system_version = "10.14"
+
+[patch."https://github.com/rustdesk-org/kcp-sys"]
+kcp-sys = { path = "libs/kcp-sys" }
 
 #https://github.com/johnthagen/min-sized-rust
 [profile.release]

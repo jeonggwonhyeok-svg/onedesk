@@ -555,6 +555,25 @@ pub async fn start_server(is_server: bool, no_server: bool) {
             if let Err(err) = crate::ipc::start("") {
                 log::error!("Failed to start ipc: {}", err);
                 if crate::is_server() {
+                    #[cfg(target_os = "macos")]
+                    {
+                        // If GUI holds the lock, don't kill it.
+                        // Keep this agent alive for tray icon — just skip IPC.
+                        // When GUI exits, restart to take over IPC.
+                        if crate::platform::macos::is_gui_lock_held() {
+                            log::info!("IPC occupied by running GUI, tray-only mode");
+                            std::thread::spawn(|| {
+                                loop {
+                                    std::thread::sleep(std::time::Duration::from_secs(3));
+                                    if !crate::platform::macos::is_gui_lock_held() {
+                                        log::info!("GUI exited, restarting agent to take over IPC");
+                                        std::process::exit(0);
+                                    }
+                                }
+                            });
+                            return; // exit IPC thread only, tray keeps running
+                        }
+                    }
                     log::error!("ipc is occupied by another process, try kill it");
                     std::thread::spawn(stop_main_window_process).join().ok();
                 }
@@ -572,6 +591,7 @@ pub async fn start_server(is_server: bool, no_server: bool) {
         crate::platform::try_kill_broker();
         #[cfg(feature = "hwcodec")]
         scrap::hwcodec::start_check_process();
+        crate::session_monitor::start_session_monitor();
         crate::RendezvousMediator::start_all().await;
     } else {
         match crate::ipc::connect(1000, "").await {

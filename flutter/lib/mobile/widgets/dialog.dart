@@ -64,7 +64,7 @@ void setPermanentPasswordDialog(OverlayDialogManager dialogManager) async {
                 }
                 return val
                     ? null
-                    : translate('Too short, at least 6 characters.');
+                    : translate('The confirmation is not identical.');
               },
             ).workaroundFreezeLinuxMint(),
             TextFormField(

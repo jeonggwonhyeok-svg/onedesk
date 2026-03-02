@@ -18,6 +18,7 @@ import 'package:flutter_svg/flutter_svg.dart';
 import '../consts.dart';
 import '../common.dart';
 import '../common/widgets/overlay.dart';
+import '../common/widgets/chat_page.dart';
 import '../main.dart';
 import 'model.dart';
 
@@ -96,6 +97,7 @@ class ChatModel with ChangeNotifier {
 
   MessageKey _currentKey = MessageKey('', -2); // -2 is invalid value
   late bool _isShowCMSidePage = false;
+  bool _isMobileChatPageOpen = false;
 
   Map<MessageKey, MessageBody> get messages => _messages;
 
@@ -199,17 +201,37 @@ class ChatModel with ChangeNotifier {
 
   showChatWindowOverlay({Offset? chatInitPos}) {
     if (chatWindowOverlayEntry != null) return;
+
+    // 모바일: 전체 화면 채팅 페이지로 이동
+    if (isMobile) {
+      if (_isMobileChatPageOpen) return;
+      _isMobileChatPageOpen = true;
+      final key = currentKey;
+      final context = _blockableOverlayState.state?.context;
+      if (context != null) {
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (context) => MobileChatPage(
+              peerId: key.peerId,
+              connId: key.connId,
+              chatPageType: key.isOut ? null : ChatPageType.mobileMain,
+            ),
+          ),
+        ).then((_) {
+          _isMobileChatPageOpen = false;
+        });
+      } else {
+        _isMobileChatPageOpen = false;
+      }
+      return;
+    }
+
     isWindowFocus.value = true;
     _blockableOverlayState.setMiddleBlocked(true);
 
     final overlayState = _blockableOverlayState.state;
     if (overlayState == null) return;
-    if (isMobile &&
-        !gFFI.chatModel.currentKey.isOut && // not in remote page
-        gFFI.chatModel.latestReceivedKey != null) {
-      gFFI.chatModel.changeCurrentKey(gFFI.chatModel.latestReceivedKey!);
-      gFFI.chatModel.mobileClearClientUnread(gFFI.chatModel.currentKey.connId);
-    }
     final overlay = OverlayEntry(builder: (context) {
       return Listener(
           onPointerDown: (_) {
@@ -372,9 +394,10 @@ class ChatModel with ChangeNotifier {
 
     final messagekey = MessageKey(peerId, id);
 
-    // mobile: first message show overlay icon
-    if (!isDesktop && chatIconOverlayEntry == null) {
-      showChatIconOverlay();
+    // mobile: 채팅 메시지 수신 시 바로 채팅 페이지 열기
+    if (isMobile && !_isMobileChatPageOpen) {
+      changeCurrentKey(messagekey);
+      showChatWindowOverlay();
     }
     // show chat page
     await showChatPage(messagekey);

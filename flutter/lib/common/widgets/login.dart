@@ -374,7 +374,7 @@ Future<bool?> loginDialog() async {
     Future<void> onLogin() async {
       // 유효성 검사
       if (email.text.isEmpty) {
-        setState(() => emailMsg = translate('Please enter your email'));
+        setState(() => emailMsg = translate('Enter your email'));
         return;
       }
       if (!_emailRegex.hasMatch(email.text)) {
@@ -382,7 +382,7 @@ Future<bool?> loginDialog() async {
         return;
       }
       if (password.text.isEmpty) {
-        setState(() => passwordMsg = translate('Password missed'));
+        setState(() => passwordMsg = translate('Enter your password'));
         return;
       }
 
@@ -394,6 +394,7 @@ Future<bool?> loginDialog() async {
 
         // 로그인 API 호출
         final loginRes = await authService.login(email.text, password.text);
+        
         if (!loginRes.success) {
           setState(() {
             passwordMsg = translate('Login failed. Please check your credentials.');
@@ -406,7 +407,7 @@ Future<bool?> loginDialog() async {
         final meRes = await authService.me();
         if (!meRes.success || meRes.data == null) {
           setState(() {
-            passwordMsg = translate('Failed to get user info');
+            passwordMsg = translate('Bad Request');
             isInProgress = false;
           });
           return;
@@ -423,7 +424,7 @@ Future<bool?> loginDialog() async {
         final registerRes = await sessionService.registerSession(deviceId, version);
         if (!registerRes.success) {
           setState(() {
-            passwordMsg = translate('Failed to register session');
+            passwordMsg = translate('Bad Request');
             isInProgress = false;
           });
           return;
@@ -437,7 +438,7 @@ Future<bool?> loginDialog() async {
         final activateRes = await sessionService.activateSession(deviceKey);
         if (!activateRes.success) {
           setState(() {
-            passwordMsg = '${translate('Failed to activate session')}: ${activateRes.message ?? activateRes.rawBody}';
+            passwordMsg = translate('Bad Request');
             isInProgress = false;
           });
           return;
@@ -451,7 +452,7 @@ Future<bool?> loginDialog() async {
         close(true);
       } catch (e) {
         setState(() {
-          passwordMsg = e.toString();
+          passwordMsg = translate('Bad Request');
           isInProgress = false;
         });
       }
@@ -492,7 +493,7 @@ Future<bool?> loginDialog() async {
 
         if (!result.success) {
           setState(() {
-            passwordMsg = result.error ?? translate('Google login failed');
+            passwordMsg = translate('Bad Request');
             isInProgress = false;
           });
           return;
@@ -503,13 +504,13 @@ Future<bool?> loginDialog() async {
           close(true);
         } else {
           setState(() {
-            passwordMsg = translate('Failed to get user info');
+            passwordMsg = translate('Bad Request');
             isInProgress = false;
           });
         }
       } catch (e) {
         setState(() {
-          passwordMsg = e.toString();
+          passwordMsg = translate('Bad Request');
           isInProgress = false;
         });
       }
@@ -680,7 +681,7 @@ void withdrawConfirmDialog() {
             isLoading = false;
           });
           BotToast.showText(
-            text: response.message ?? translate('Failed to withdraw'),
+            text: translate('Bad Request'),
             contentColor: Colors.red,
           );
         }
@@ -689,7 +690,7 @@ void withdrawConfirmDialog() {
           isLoading = false;
         });
         BotToast.showText(
-          text: translate('Failed to withdraw'),
+          text: translate('Bad Request'),
           contentColor: Colors.red,
         );
       }

@@ -13,6 +13,7 @@ import 'package:flutter_hbb/consts.dart';
 import 'package:flutter_hbb/desktop/pages/connection_page.dart';
 import 'package:flutter_hbb/desktop/pages/desktop_setting_page.dart';
 import 'package:flutter_hbb/desktop/pages/desktop_tab_page.dart';
+import 'package:flutter_hbb/desktop/pages/my_page.dart' show showDesktopAddonSessionDialog;
 import 'package:flutter_hbb/desktop/widgets/update_progress.dart';
 import 'package:flutter_hbb/models/platform_model.dart';
 import 'package:flutter_hbb/models/server_model.dart';
@@ -140,10 +141,21 @@ class _DesktopHomePageState extends State<DesktopHomePage>
                 ),
               ),
             ),
-            // Connection count card
-            _buildConnectionCountCard(context),
-            // Plan card
-            _buildPlanCard(context),
+            // Connection count card & Plan card (프리플랜이면 업그레이드 버튼만 표시)
+            Obx(() {
+              final planType = gFFI.userModel.planType.value;
+              final isFree = planType == 'FREE' || planType.isEmpty;
+              if (isFree) {
+                return _buildPlanUpgradeButton(context);
+              } else {
+                return Column(
+                  children: [
+                    _buildConnectionCountCard(context),
+                    _buildPlanCard(context),
+                  ],
+                );
+              }
+            }),
             // Bottom buttons (settings + user)
             _buildBottomButtons(context),
           ],
@@ -442,7 +454,7 @@ class _DesktopHomePageState extends State<DesktopHomePage>
           // 동시 접속 수 추가 버튼
           InkWell(
             onTap: () {
-              DesktopTabPage.onAddPlanSelection();
+              showDesktopAddonSessionDialog();
             },
             onHover: (value) => buttonHover.value = value,
             borderRadius: BorderRadius.circular(8),
@@ -552,6 +564,47 @@ class _DesktopHomePageState extends State<DesktopHomePage>
               )),
             ),
           ],
+        ),
+      ),
+    );
+  }
+
+  /// 프리플랜일 때 표시되는 플랜 업그레이드 버튼
+  Widget _buildPlanUpgradeButton(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(left: 16, right: 16, top: 16, bottom: 8),
+      child: InkWell(
+        onTap: () => DesktopTabPage.onAddPlanSelection(),
+        borderRadius: BorderRadius.circular(12),
+        child: Container(
+          width: double.infinity,
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+          decoration: BoxDecoration(
+            gradient: const LinearGradient(
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+              colors: [Color(0xFF5F71FF), Color(0xFF4350B5)],
+            ),
+            borderRadius: BorderRadius.circular(12),
+          ),
+          child: Row(
+            children: [
+              Text(
+                translate('Plan Upgrade'),
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 16,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              const Spacer(),
+              const Icon(
+                Icons.chevron_right,
+                color: Colors.white,
+                size: 22,
+              ),
+            ],
+          ),
         ),
       ),
     );
@@ -887,12 +940,6 @@ class _DesktopHomePageState extends State<DesktopHomePage>
           bind.mainIsProcessTrusted(prompt: true);
           watchIsProcessTrust = true;
         }, help: 'Help', link: translate("doc_mac_permission"));
-      } else if (!bind.mainIsCanInputMonitoring(prompt: false)) {
-        return buildInstallCard("Permissions", "config_input", "Configure",
-            () async {
-          bind.mainIsCanInputMonitoring(prompt: true);
-          watchIsInputMonitoring = true;
-        }, help: 'Help', link: translate("doc_mac_permission"));
       } else if (!isOutgoingOnly &&
           !svcStopped.value &&
           bind.mainIsInstalled() &&
@@ -1095,6 +1142,12 @@ class _DesktopHomePageState extends State<DesktopHomePage>
   @override
   void initState() {
     super.initState();
+    // Prompt macOS permissions on every launch.
+    // _promptAllMacPermissions only prompts for permissions not yet granted,
+    // so it's safe to call every time.
+    if (isMacOS) {
+      _promptAllMacPermissions();
+    }
     _updateTimer = periodic_immediate(const Duration(seconds: 1), () async {
       await gFFI.serverModel.fetchID();
       // Update svcStatus for the status indicator
@@ -1317,6 +1370,20 @@ class _DesktopHomePageState extends State<DesktopHomePage>
         windowManager.setSize(getIncomingOnlyHomeSize());
       }
     }
+  }
+
+  void _promptAllMacPermissions() {
+    final isOutgoingOnly = bind.isOutgoingOnly();
+    if (!(isOutgoingOnly || bind.mainIsCanScreenRecording(prompt: false))) {
+      bind.mainIsCanScreenRecording(prompt: true);
+      watchIsCanScreenRecording = true;
+    }
+    if (!isOutgoingOnly && !bind.mainIsProcessTrusted(prompt: false)) {
+      bind.mainIsProcessTrusted(prompt: true);
+      watchIsProcessTrust = true;
+    }
+    // Input monitoring prompt removed — not essential for basic remote control.
+    // Users who need keyboard grab can enable it manually in System Settings.
   }
 
   @override

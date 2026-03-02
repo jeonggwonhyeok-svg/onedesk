@@ -3094,6 +3094,30 @@ pub fn is_service_running(service_name: &str) -> bool {
     }
 }
 
+/// Try to auto-start the Windows service if it is installed but not running.
+/// Called on normal app startup. Always attempts to start regardless of stop-service option.
+pub fn try_start_service_if_not_running() {
+    if !is_installed() {
+        return;
+    }
+
+    // Clear stop-service flag so the server registers with rendezvous
+    hbb_common::config::Config::set_option("stop-service".into(), "".into());
+
+    if !is_self_service_running() {
+        let app_name = crate::get_app_name();
+        log::info!("Service is not running, attempting to start with UAC: {}", app_name);
+        // sc start requires admin privileges, use ShellExecute with "runas" verb
+        match run_uac("sc", &format!("start {}", app_name)) {
+            Ok(true) => log::info!("Service start UAC request succeeded"),
+            Ok(false) => log::warn!("Service start UAC request was denied by user"),
+            Err(e) => log::error!("Service start UAC request failed: {}", e),
+        }
+    } else {
+        log::info!("Service is already running");
+    }
+}
+
 pub fn is_x64() -> bool {
     const PROCESSOR_ARCHITECTURE_AMD64: u16 = 9;
 

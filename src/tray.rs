@@ -129,6 +129,10 @@ fn make_tray() -> hbb_common::ResultType<()> {
         );
 
         if let tao::event::Event::NewEvents(tao::event::StartCause::Init) = event {
+            // Override tao's delegate to handle app reopen (Finder/Launchpad click)
+            #[cfg(target_os = "macos")]
+            crate::platform::macos::setup_reopen_handler();
+
             // We create the icon once the event loop is actually running
             // to prevent issues like https://github.com/tauri-apps/tray-icon/issues/90
             let tray = TrayIconBuilder::new()
@@ -157,14 +161,27 @@ fn make_tray() -> hbb_common::ResultType<()> {
 
         if let Ok(event) = menu_channel.try_recv() {
             if event.id == quit_i.id() {
-                /* failed in windows, seems no permission to check system process
-                if !crate::check_process("--server", false) {
+                // 서비스 종료 전 로그아웃 처리 (자동 로그인이 아닌 경우)
+                crate::session_monitor::logout_on_quit();
+
+                #[cfg(target_os = "macos")]
+                {
+                    // Stop service via IPC (blocks remote access) without deleting plist files.
+                    crate::ipc::set_option("stop-service", "Y");
+                    // Write quit flag file - Flutter polls for this and exits cleanly.
+                    let _ = std::fs::write("/tmp/onedesk_quit", "1");
+                    // Unload agent so launchd won't restart --server (KeepAlive=true).
+                    let agent_plist = format!("/Library/LaunchAgents/{}_server.plist", crate::get_full_name());
+                    let _ = std::process::Command::new("launchctl")
+                        .args(&["unload", &agent_plist])
+                        .status();
                     *control_flow = ControlFlow::Exit;
-                    return;
                 }
-                */
-                if !crate::platform::uninstall_service(false, false) {
-                    *control_flow = ControlFlow::Exit;
+                #[cfg(not(target_os = "macos"))]
+                {
+                    if !crate::platform::uninstall_service(false, true) {
+                        *control_flow = ControlFlow::Exit;
+                    }
                 }
             } else if event.id == open_i.id() {
                 open_func();

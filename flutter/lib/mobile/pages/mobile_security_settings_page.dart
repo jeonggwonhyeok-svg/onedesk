@@ -54,7 +54,8 @@ class _MobileSecuritySettingsPageState
                   fontWeight: FontWeight.w600,
                 ),
               ),
-              centerTitle: true,
+              centerTitle: false,
+              titleSpacing: 0,
             ),
             body: Column(
               children: [

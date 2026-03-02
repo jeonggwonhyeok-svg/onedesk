@@ -86,6 +86,7 @@ pub static ref T: std::collections::HashMap<&'static str, &'static str> =
         ("Connection in progress. Please wait.", "接続中です。お待ちください。"),
         ("Please try 1 minute later", "1分後にもう一度お試しください"),
         ("Login Error", "ログインエラー"),
+        ("Access Denied", "アクセス拒否"),
         ("Successful", "成功"),
         ("Connected, waiting for image...", "接続完了、画像を待機中..."),
         ("Name", "名前"),
@@ -934,5 +935,8 @@ pub static ref T: std::collections::HashMap<&'static str, &'static str> =
         // モバイルログインページ
         ("The easiest and fastest\n way When you need your PC", "最も簡単で速く\nPC が必要な瞬間"),
         ("ID Login/Sign up", "ID ログイン/会員登録"),
+        ("Bad Request", "接続が不安定です。しばらくしてからお試しください。"),
+        ("Login other device", "他のデバイスからログインされました。"),
+        ("Can use on update", "新しいバージョンがあります。\nアップデート後にご利用ください。"),
     ].iter().cloned().collect();
 }

@@ -80,6 +80,7 @@ pub static ref T: std::collections::HashMap<&'static str, &'static str> =
         ("Connection in progress. Please wait.", ""),
         ("Please try 1 minute later", ""),
         ("Login Error", ""),
+        ("Access Denied", ""),
         ("Successful", ""),
         ("Connected, waiting for image...", ""),
         ("Name", ""),
@@ -729,5 +730,6 @@ pub static ref T: std::collections::HashMap<&'static str, &'static str> =
         ("server-oss-not-support-tip", ""),
         ("input note here", ""),
         ("note-at-conn-end-tip", ""),
+        ("Bad Request", ""),
     ].iter().cloned().collect();
 }

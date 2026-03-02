@@ -21,6 +21,11 @@ import texture_rgba_renderer
 
 class MainFlutterWindow: NSWindow {
     override func awakeFromNib() {
+        // Hide background processes (--server, --cm) from Dock
+        let args = ProcessInfo.processInfo.arguments
+        if args.contains("--server") || args.contains("--cm") {
+            NSApp.setActivationPolicy(.accessory)
+        }
         onedesk_core_main();
         let flutterViewController = FlutterViewController.init()
         let windowFrame = self.frame
@@ -57,24 +62,30 @@ class MainFlutterWindow: NSWindow {
     override public func order(_ place: NSWindow.OrderingMode, relativeTo otherWin: Int) {
         super.order(place, relativeTo: otherWin)
         hiddenWindowAtLaunch()
+        // Only promote to .regular when window is actually visible.
+        // Don't set .accessory here — let orderOut() handle that.
+        // Setting .accessory here races with makeKeyAndOrderFront/orderFront
+        // which set .regular before the window is fully visible.
+        if place != .out && self.isVisible {
+            NSApp.setActivationPolicy(.regular)
+            NSApp.activate(ignoringOtherApps: true)
+        }
     }
 
-    // Dynamic activation policy: show in Dock when window is visible, hide when not
+    // window_manager show() calls makeKeyAndOrderFront
     override public func orderFront(_ sender: Any?) {
         NSApp.setActivationPolicy(.regular)
         super.orderFront(sender)
         NSApp.activate(ignoringOtherApps: true)
     }
 
+    // window_manager hide() calls orderOut
     override public func orderOut(_ sender: Any?) {
         super.orderOut(sender)
-        // Hide from Dock if no visible windows remain
-        let hasVisibleWindows = NSApp.windows.contains { $0.isVisible && $0 != self }
-        if !hasVisibleWindows {
-            NSApp.setActivationPolicy(.accessory)
-        }
+        NSApp.setActivationPolicy(.accessory)
     }
 
+    // window_manager show() calls this via makeKeyAndOrderFront
     override public func makeKeyAndOrderFront(_ sender: Any?) {
         NSApp.setActivationPolicy(.regular)
         super.makeKeyAndOrderFront(sender)

@@ -77,7 +77,7 @@ class GoogleAuthService {
       debugPrint('[GoogleAuth] Error: $e');
       return GoogleAuthResult(
         success: false,
-        error: e.toString(),
+        error: 'Bad Request',
       );
     } finally {
       await _stopServer();
@@ -188,7 +188,7 @@ class GoogleAuthService {
         if (!completer.isCompleted) {
           completer.complete(GoogleAuthResult(
             success: false,
-            error: 'Token not received (URI: ${request.uri})',
+            error: 'Bad Request',
           ));
         }
         return;
@@ -203,7 +203,7 @@ class GoogleAuthService {
           if (!completer.isCompleted) {
             completer.complete(GoogleAuthResult(
               success: false,
-              error: 'Token authentication failed',
+              error: 'Bad Request',
             ));
           }
           return;
@@ -215,7 +215,7 @@ class GoogleAuthService {
           if (!completer.isCompleted) {
             completer.complete(GoogleAuthResult(
               success: false,
-              error: 'Failed to get user info',
+              error: 'Bad Request',
             ));
           }
           return;
@@ -261,7 +261,7 @@ class GoogleAuthService {
         if (!completer.isCompleted) {
           completer.complete(GoogleAuthResult(
             success: false,
-            error: e.toString(),
+            error: 'Bad Request',
           ));
         }
       }

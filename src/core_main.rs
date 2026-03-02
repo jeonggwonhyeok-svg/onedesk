@@ -183,11 +183,27 @@ pub fn core_main() -> Option<Vec<String>> {
     if args.is_empty() || crate::common::is_empty_uni_link(&args[0]) {
         #[cfg(target_os = "macos")]
         {
+            // Single instance: if another GUI is already running, exit immediately.
+            if !crate::platform::macos::try_acquire_gui_lock() {
+                return None;
+            }
+            // Always clean up quit flag on startup.
+            let _ = std::fs::remove_file("/tmp/onedesk_quit");
             crate::platform::macos::try_remove_temp_update_dir(None);
+            // Auto-start daemon/agent if installed but not running
+            std::thread::spawn(|| {
+                crate::platform::macos::try_start_daemon_if_not_running();
+            });
         }
 
         #[cfg(windows)]
-        hbb_common::config::PeerConfig::preload_peers();
+        {
+            hbb_common::config::PeerConfig::preload_peers();
+            // Auto-start Windows service if installed but not running
+            std::thread::spawn(|| {
+                crate::platform::windows::try_start_service_if_not_running();
+            });
+        }
         std::thread::spawn(move || crate::start_server(false, no_server));
     } else {
         #[cfg(windows)]

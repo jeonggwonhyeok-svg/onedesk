@@ -86,6 +86,7 @@ pub static ref T: std::collections::HashMap<&'static str, &'static str> =
         ("Connection in progress. Please wait.", "连接进行中，请稍候。"),
         ("Please try 1 minute later", "请1分钟后重试"),
         ("Login Error", "登录错误"),
+        ("Access Denied", "访问被拒绝"),
         ("Successful", "成功"),
         ("Connected, waiting for image...", "已连接，等待画面..."),
         ("Name", "名称"),
@@ -933,5 +934,8 @@ pub static ref T: std::collections::HashMap<&'static str, &'static str> =
         // 移动端登录页面
         ("The easiest and fastest\n way When you need your PC", "最简单、最快捷的方式\n当您需要电脑时"),
         ("ID Login/Sign up", "ID 登录/注册"),
+        ("Bad Request", "连接不稳定，请稍后重试。"),
+        ("Login other device", "您已在其他设备上登录。"),
+        ("Can use on update", "有新版本可用。\n请更新后再使用。"),
     ].iter().cloned().collect();
 }

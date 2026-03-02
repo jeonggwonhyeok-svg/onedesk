@@ -206,6 +206,7 @@ pub enum Data {
         recording: bool,
         block_input: bool,
         from_switch: bool,
+        peer_platform: String,
     },
     ChatMessage {
         text: String,

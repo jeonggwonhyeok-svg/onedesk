@@ -56,7 +56,7 @@ class MobileKakaoAuthService {
                 if (!pickupRes.success) {
                   completer.complete(MobileKakaoAuthResult(
                     success: false,
-                    error: 'Token authentication failed',
+                    error: 'Bad Request',
                   ));
                   return;
                 }
@@ -66,7 +66,7 @@ class MobileKakaoAuthService {
                 if (!meRes.success || meRes.data == null) {
                   completer.complete(MobileKakaoAuthResult(
                     success: false,
-                    error: 'Failed to get user info',
+                    error: 'Bad Request',
                   ));
                   return;
                 }
@@ -107,7 +107,7 @@ class MobileKakaoAuthService {
                 debugPrint('[MobileKakaoAuth] Pickup error: $e');
                 completer.complete(MobileKakaoAuthResult(
                   success: false,
-                  error: e.toString(),
+                  error: 'Bad Request',
                 ));
               }
             },
@@ -126,7 +126,7 @@ class MobileKakaoAuthService {
       debugPrint('[MobileKakaoAuth] Error: $e');
       return MobileKakaoAuthResult(
         success: false,
-        error: e.toString(),
+        error: 'Bad Request',
       );
     }
   }
@@ -189,7 +189,8 @@ class _KakaoLoginWebViewState extends State<_KakaoLoginWebView> {
             fontWeight: FontWeight.w600,
           ),
         ),
-        centerTitle: true,
+        centerTitle: false,
+        titleSpacing: 0,
       ),
       body: Stack(
         children: [

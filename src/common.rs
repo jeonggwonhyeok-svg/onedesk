@@ -1463,7 +1463,24 @@ pub fn handle_url_scheme(url: String) {
     #[cfg(not(target_os = "ios"))]
     if let Err(err) = crate::ipc::send_url_scheme(url.clone()) {
         log::debug!("Send the url to the existing flutter process failed, {}. Let's open a new program to handle this.", err);
-        let _ = crate::run_me(vec![url]);
+        // On macOS, use `open -n` to launch as a proper app instance.
+        // run_me spawns the raw binary which crashes (no NSApplication context).
+        #[cfg(target_os = "macos")]
+        {
+            if url.is_empty() {
+                let _ = std::process::Command::new("open")
+                    .args(&["-n", "-a", "/Applications/OneDesk.app"])
+                    .spawn();
+            } else {
+                let _ = std::process::Command::new("open")
+                    .args(&["-n", "-a", "/Applications/OneDesk.app", "--args", &url])
+                    .spawn();
+            }
+        }
+        #[cfg(not(target_os = "macos"))]
+        {
+            let _ = crate::run_me(vec![url]);
+        }
     }
 }
 

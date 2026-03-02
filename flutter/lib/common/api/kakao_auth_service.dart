@@ -56,7 +56,7 @@ class KakaoAuthService {
         await _stopServer();
         return KakaoAuthResult(
           success: false,
-          error: 'Failed to open browser',
+          error: 'Bad Request',
         );
       }
 
@@ -67,7 +67,7 @@ class KakaoAuthService {
           debugPrint('[KakaoAuth] Timeout waiting for callback');
           return KakaoAuthResult(
             success: false,
-            error: 'Login timeout',
+            error: 'Bad Request',
           );
         },
       );
@@ -77,7 +77,7 @@ class KakaoAuthService {
       debugPrint('[KakaoAuth] Error: $e');
       return KakaoAuthResult(
         success: false,
-        error: e.toString(),
+        error: 'Bad Request',
       );
     } finally {
       await _stopServer();
@@ -188,7 +188,7 @@ class KakaoAuthService {
         if (!completer.isCompleted) {
           completer.complete(KakaoAuthResult(
             success: false,
-            error: 'Token not received (URI: ${request.uri})',
+            error: 'Bad Request',
           ));
         }
         return;
@@ -203,7 +203,7 @@ class KakaoAuthService {
           if (!completer.isCompleted) {
             completer.complete(KakaoAuthResult(
               success: false,
-              error: 'Token authentication failed',
+              error: 'Bad Request',
             ));
           }
           return;
@@ -215,7 +215,7 @@ class KakaoAuthService {
           if (!completer.isCompleted) {
             completer.complete(KakaoAuthResult(
               success: false,
-              error: 'Failed to get user info',
+              error: 'Bad Request',
             ));
           }
           return;
@@ -261,7 +261,7 @@ class KakaoAuthService {
         if (!completer.isCompleted) {
           completer.complete(KakaoAuthResult(
             success: false,
-            error: e.toString(),
+            error: 'Bad Request',
           ));
         }
       }

@@ -71,9 +71,10 @@ class PaymentService {
   // ===========================
 
   /// Welcome 주문 생성
-  Future<ApiResponse> createWelcomeOrder(String productCode) async {
+  Future<ApiResponse> createWelcomeOrder(int addonUnitPrice, int addonCount) async {
     return await _api.postJson('api/payments/welcome/orders', data: {
-      'productCode': productCode.toUpperCase(),
+      'addonUnitPrice': addonUnitPrice,
+      'addonCount': addonCount,
     });
   }
 

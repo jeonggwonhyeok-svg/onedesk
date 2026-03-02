@@ -55,11 +55,18 @@ Future<bool?> resetPasswordDialog() async {
 
     // 이메일 인증코드 발송
     Future<void> sendVerificationCode() async {
+      final name = nameController.text.trim();
       final email = emailController.text.trim();
+
+      // 이름 유효성 검사
+      if (name.isEmpty) {
+        setState(() => nameError = translate('Enter your name'));
+        return;
+      }
 
       // 이메일 유효성 검사
       if (email.isEmpty) {
-        setState(() => emailError = translate('Please enter your email'));
+        setState(() => emailError = translate('Enter your email'));
         return;
       }
       if (!_emailRegex.hasMatch(email)) {
@@ -88,9 +95,9 @@ Future<bool?> resetPasswordDialog() async {
 
         // 2. 인증코드 발송
         final sendRes = await authService.sendVerificationEmail(email);
-        if (!sendRes.success && !sendRes.rawBody.contains('성공')) {
+        if (!sendRes.rawBody.contains('성공')) {
           setState(() {
-            emailError = translate('Failed to send verification code');
+            emailError = translate('Bad Request');
             isInProgress = false;
           });
           return;
@@ -104,7 +111,7 @@ Future<bool?> resetPasswordDialog() async {
         showToast(translate('Verification code sent'));
       } catch (e) {
         setState(() {
-          emailError = e.toString();
+          emailError = translate('Bad Request');
           isInProgress = false;
         });
       }
@@ -130,7 +137,7 @@ Future<bool?> resetPasswordDialog() async {
         final verifyRes = await authService.verifyEmailCode(email, code);
 
         // 응답에 "성공"이 없으면 인증 실패
-        if (!verifyRes.success && !verifyRes.rawBody.contains('성공')) {
+        if (!verifyRes.rawBody.contains('성공')) {
           setState(() {
             codeError = translate('Invalid verification code');
             isInProgress = false;
@@ -145,7 +152,7 @@ Future<bool?> resetPasswordDialog() async {
         showToast(translate('Email verified'));
       } catch (e) {
         setState(() {
-          codeError = e.toString();
+          codeError = translate('Bad Request');
           isInProgress = false;
         });
       }
@@ -165,7 +172,7 @@ Future<bool?> resetPasswordDialog() async {
       }
 
       if (name.isEmpty) {
-        setState(() => nameError = translate('Please enter your name'));
+        setState(() => nameError = translate('Enter your name'));
         return;
       }
 
@@ -176,12 +183,12 @@ Future<bool?> resetPasswordDialog() async {
 
       if (!_passwordRegex.hasMatch(password)) {
         setState(() => passwordError = translate(
-            'Password must be at least 8 characters with letters, numbers and special characters'));
+            'Password requirements not met'));
         return;
       }
 
       if (password != confirmPassword) {
-        setState(() => confirmPasswordError = translate('Passwords do not match'));
+        setState(() => confirmPasswordError = translate('The confirmation is not identical.'));
         return;
       }
 
@@ -196,9 +203,9 @@ Future<bool?> resetPasswordDialog() async {
         final resetRes = await authService.resetPassword(email, name, password, confirmPassword);
 
         // 성공 여부 확인
-        if (!resetRes.success && !resetRes.rawBody.contains('성공')) {
+        if (!resetRes.rawBody.contains('성공')) {
           setState(() {
-            passwordError = resetRes.message ?? translate('Password reset failed. Please try again.');
+            passwordError = translate('Bad Request');
             isInProgress = false;
           });
           return;
@@ -208,7 +215,7 @@ Future<bool?> resetPasswordDialog() async {
         close(true);
       } catch (e) {
         setState(() {
-          passwordError = e.toString();
+          passwordError = translate('Bad Request');
           isInProgress = false;
         });
       }

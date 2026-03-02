@@ -28,6 +28,17 @@ String _getPeerPlatform(String peerId) {
   }
 }
 
+/// 피어 캐시에서 OS 버전 정보 조회
+String _getPeerOsVersion(String peerId) {
+  try {
+    final peer = bind.mainGetPeerSync(id: peerId);
+    final config = jsonDecode(peer);
+    return config['info']?['os_version'] ?? '';
+  } catch (e) {
+    return '';
+  }
+}
+
 class VoiceCallDialogPage extends StatefulWidget {
   final int clientId;
   final String clientName;
@@ -241,6 +252,7 @@ class _VoiceCallDialogPageState extends State<VoiceCallDialogPage> {
                 _getPeerPlatform(widget.clientPeerId),
                 size: 24,
                 color: _vcAccentColor,
+                version: _getPeerOsVersion(widget.clientPeerId),
               ),
             ),
           ),

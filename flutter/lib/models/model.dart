@@ -1734,12 +1734,13 @@ class VirtualMouseMode with ChangeNotifier {
   }
 
   void loadOptions() {
-    _showVirtualMouse =
+    final canShow = _shouldShow();
+    _showVirtualMouse = canShow &&
         bind.mainGetLocalOption(key: kOptionShowVirtualMouse) == 'Y';
     _virtualMouseScale = double.tryParse(
             bind.mainGetLocalOption(key: kOptionVirtualMouseScale)) ??
         1.0;
-    _showVirtualJoystick =
+    _showVirtualJoystick = canShow &&
         bind.mainGetLocalOption(key: kOptionShowVirtualJoystick) == 'Y';
     notifyListeners();
   }

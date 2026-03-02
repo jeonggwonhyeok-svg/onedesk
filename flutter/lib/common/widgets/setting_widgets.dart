@@ -236,10 +236,10 @@ List<DisplayOptionDef> getCommonDisplayOptions({bool forToolbarDialog = false}) 
     // 설정 페이지 전용 옵션 (툴바 다이얼로그에서는 제외)
     if (!forToolbarDialog)
       const DisplayOptionDef(kOptionViewOnly, 'View Mode', sessionKey: 'view-only'),
-    if (!forToolbarDialog && (isDesktop || isWebDesktop))
-      const DisplayOptionDef(kKeyShowMonitorsToolbar, 'show_monitors_tip'),
-    if (!forToolbarDialog && (isDesktop || isWebDesktop))
-      const DisplayOptionDef(kOptionCollapseToolbar, 'Collapse toolbar'),
+    // if (!forToolbarDialog && (isDesktop || isWebDesktop))
+    //   const DisplayOptionDef(kKeyShowMonitorsToolbar, 'show_monitors_tip'),
+    // if (!forToolbarDialog && (isDesktop || isWebDesktop))
+    //   const DisplayOptionDef(kOptionCollapseToolbar, 'Collapse toolbar'),
     // 세션 토글 키가 다른 경우 sessionKey 명시
     const DisplayOptionDef(kOptionShowRemoteCursor, 'Show remote cursor', sessionKey: 'show-remote-cursor'),
     const DisplayOptionDef(kOptionFollowRemoteCursor, 'Follow remote cursor', sessionKey: 'follow-remote-cursor'),
@@ -266,10 +266,10 @@ List<DisplayOptionDef> getCommonDisplayOptions({bool forToolbarDialog = false}) 
 List<(String, String)> otherDefaultSettings() {
   List<(String, String)> v = [
     ('View Mode', kOptionViewOnly),
-    if ((isDesktop || isWebDesktop))
-      ('show_monitors_tip', kKeyShowMonitorsToolbar),
-    if ((isDesktop || isWebDesktop))
-      ('Collapse toolbar', kOptionCollapseToolbar),
+    // if ((isDesktop || isWebDesktop))
+    //   ('show_monitors_tip', kKeyShowMonitorsToolbar),
+    // if ((isDesktop || isWebDesktop))
+    //   ('Collapse toolbar', kOptionCollapseToolbar),
     ('Show remote cursor', kOptionShowRemoteCursor),
     ('Follow remote cursor', kOptionFollowRemoteCursor),
     ('Follow remote window focus', kOptionFollowRemoteWindow),
@@ -351,7 +351,7 @@ class TrackpadSpeedWidgetState extends State<TrackpadSpeedWidget> {
               activeTrackColor: sliderColor,
               inactiveTrackColor: sliderColor.withValues(alpha: 0.2),
               thumbColor: sliderColor,
-              thumbShape: const _BorderedRoundSliderThumbShape(
+              thumbShape: const BorderedRoundSliderThumbShape(
                 enabledThumbRadius: 12,
                 borderColor: Color(0xFFFEFEFE),
                 borderWidth: 3,
@@ -400,13 +400,13 @@ class TrackpadSpeedWidgetState extends State<TrackpadSpeedWidget> {
 }
 
 /// 테두리가 있는 원형 슬라이더 Thumb Shape
-class _BorderedRoundSliderThumbShape extends SliderComponentShape {
+class BorderedRoundSliderThumbShape extends SliderComponentShape {
   final double enabledThumbRadius;
   final Color borderColor;
   final double borderWidth;
   final double elevation;
 
-  const _BorderedRoundSliderThumbShape({
+  const BorderedRoundSliderThumbShape({
     this.enabledThumbRadius = 10.0,
     required this.borderColor,
     required this.borderWidth,

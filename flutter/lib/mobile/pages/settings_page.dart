@@ -723,7 +723,8 @@ class _SettingsState extends State<SettingsPage> with WidgetsBindingObserver {
             fontWeight: FontWeight.w600,
           ),
         ),
-        centerTitle: true,
+        centerTitle: false,
+        titleSpacing: 0,
       ),
       body: Column(
         children: [
@@ -1072,11 +1073,7 @@ class _SettingsState extends State<SettingsPage> with WidgetsBindingObserver {
 
                             changeWhiteList(callback: update);
                           },
-                          trailing: _onlyWhiteList
-                              ? const Icon(Icons.warning_amber_rounded,
-                                  color: Color.fromARGB(255, 255, 204, 0),
-                                  size: 20)
-                              : null,
+                          trailing: null,
                         ),
                         _buildToggleRow(
                           label: translate('Adaptive bitrate'),
@@ -1714,9 +1711,7 @@ void showAbout(OverlayDialogManager dialogManager) {
             child: Padding(
               padding: EdgeInsets.symmetric(vertical: 8),
               child: Text('onedesk.co.kr',
-                  style: TextStyle(
-                    decoration: TextDecoration.underline,
-                  )),
+                  style: TextStyle()),
             )),
       ]),
       actions: [],
@@ -1785,7 +1780,8 @@ class _DisplayPageState extends State<DisplayPage> {
             fontWeight: FontWeight.w600,
           ),
         ),
-        centerTitle: true,
+        centerTitle: false,
+        titleSpacing: 0,
       ),
       body: Column(
         children: [

@@ -51,7 +51,6 @@ class ApiResponse {
           // 에러 필드가 있으면 실패로 판단
           if (decoded.containsKey('error') && decoded['error'] != null) {
             success = false;
-            message = decoded['error'].toString();
           }
 
           // 상태 코드로 성공 여부 판단
@@ -66,8 +65,13 @@ class ApiResponse {
         }
       }
     } catch (e) {
-      // JSON 파싱 실패 시 원본 메시지 사용
-      message = body;
+      // JSON 파싱 실패 시
+      success = false;
+    }
+
+    // 실패 시 통일된 에러 메시지 사용 (번역키)
+    if (!success) {
+      message = 'Bad Request';
     }
 
     return ApiResponse(
@@ -89,7 +93,7 @@ class ApiResponse {
   factory ApiResponse.error(String errorMessage) {
     return ApiResponse(
       success: false,
-      message: errorMessage,
+      message: 'Bad Request',
       data: null,
       rawBody: 'ERROR: $errorMessage',
       statusCode: -1,
@@ -134,6 +138,17 @@ class UserInfo {
     this.connectionCount = 1,
   });
 
+  /// 서버 planType 정규화 (SOLO_PLAN → SOLO, PRO_PLAN → PRO 등)
+  static String _normalizePlanType(dynamic value) {
+    if (value == null) return 'FREE';
+    final str = value.toString().toUpperCase();
+    // _PLAN 접미사 제거
+    if (str.endsWith('_PLAN')) {
+      return str.replaceAll('_PLAN', '');
+    }
+    return str;
+  }
+
   /// JSON에서 UserInfo 생성
   factory UserInfo.fromJson(Map<String, dynamic> json) {
     int type = 1;
@@ -168,11 +183,11 @@ class UserInfo {
       lastPay: parseDate(json['paidAt']) ?? parseDate(json['createdAt']),
       deviceKey: json['deviceKey'],
       sessionKey: json['sessionKey'],
-      planType: json['planType'] ?? 'FREE',
+      planType: _normalizePlanType(json['planType']),
       billingProvider: json['billingProvider'],
       paymentStatus: json['paymentStatus'],
       nextChargeDate: parseDate(json['nextChargeDate']),
-      connectionCount: json['connectionCount'] ?? 1,
+      connectionCount: json['connectionCount'] ?? ((json['planSessionCount'] ?? 0) + (json['addonSessionCount'] ?? 0)).clamp(1, 9999),
     );
   }
 

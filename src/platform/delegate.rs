@@ -211,7 +211,6 @@ fn service_should_handle_reopen(
 ) -> BOOL {
     log::debug!("Invoking the main onedesk process");
     std::thread::spawn(move || crate::handle_url_scheme("".to_string()));
-    // Prevent default logic.
     NO
 }
 

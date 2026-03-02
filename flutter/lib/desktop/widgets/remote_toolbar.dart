@@ -528,12 +528,15 @@ class _RemoteToolbarState extends State<RemoteToolbar> {
 
   @override
   Widget build(BuildContext context) {
-    return Align(
-      alignment: Alignment.topCenter,
-      child: Obx(() => show.value
-          ? _buildToolbar(context)
-          : _buildDraggableShowHide(context)),
-    );
+    return Obx(() => Padding(
+          padding: EdgeInsets.only(top: show.value ? 16 : 0),
+          child: Align(
+            alignment: Alignment.topCenter,
+            child: show.value
+                ? _buildToolbar(context)
+                : _buildDraggableShowHide(context),
+          ),
+        ));
   }
 
   Widget _buildDraggableShowHide(BuildContext context) {

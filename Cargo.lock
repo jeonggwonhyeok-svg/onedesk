@@ -4294,7 +4294,6 @@ dependencies = [
 [[package]]
 name = "kcp-sys"
 version = "0.1.0"
-source = "git+https://github.com/rustdesk-org/kcp-sys#32a6c09fc6223f54aea83981a6aa8995931d29be"
 dependencies = [
  "anyhow",
  "auto_impl",
@@ -5686,6 +5685,7 @@ dependencies = [
  "kcp-sys",
  "keepawake",
  "lazy_static",
+ "libc",
  "libloading 0.8.4",
  "libpulse-binding",
  "libpulse-simple-binding",

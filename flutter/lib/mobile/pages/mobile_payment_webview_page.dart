@@ -198,7 +198,8 @@ class _MobilePaymentWebViewPageState extends State<MobilePaymentWebViewPage> {
               fontWeight: FontWeight.w600,
             ),
           ),
-          centerTitle: true,
+          centerTitle: false,
+          titleSpacing: 0,
         ),
         body: Stack(
           children: [

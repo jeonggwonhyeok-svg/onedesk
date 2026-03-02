@@ -2,6 +2,7 @@
 
 import 'dart:async';
 import 'dart:math';
+import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import 'package:flutter_hbb/common.dart';
 import 'package:flutter_hbb/models/input_model.dart';
@@ -782,16 +783,37 @@ class _MouseBodyState extends State<MouseBody> {
   bool _leftDown = false;
   bool _rightDown = false;
   bool _midDown = false;
+  bool _scrollUpDown = false;
+  bool _scrollDownDown = false;
   bool _dragDown = false;
 
-  Widget _buildScrollUpDown(GlobalKey key, IconData iconData, double s) {
-    return Container(
-      key: key,
-      height: 17 * s,
-      child: Icon(
-        iconData,
-        color: _kDefaultHighlightColor,
-        size: 14 * s,
+  Widget _buildScrollUpDown(GlobalKey key, IconData iconData, double s, bool isUp) {
+    final isDown = isUp ? _scrollUpDown : _scrollDownDown;
+    return Listener(
+      onPointerDown: (event) {
+        setState(() {
+          if (isUp) _scrollUpDown = true; else _scrollDownDown = true;
+        });
+      },
+      onPointerUp: (event) {
+        setState(() {
+          if (isUp) _scrollUpDown = false; else _scrollDownDown = false;
+        });
+      },
+      onPointerCancel: (event) {
+        setState(() {
+          if (isUp) _scrollUpDown = false; else _scrollDownDown = false;
+        });
+      },
+      behavior: HitTestBehavior.translucent,
+      child: Container(
+        key: key,
+        height: 17 * s,
+        child: Icon(
+          iconData,
+          color: isDown ? _kTapDownColor : _kDefaultHighlightColor,
+          size: 14 * s,
+        ),
       ),
     );
   }
@@ -836,19 +858,19 @@ class _MouseBodyState extends State<MouseBody> {
               Container(
                 width: 6 * s,
                 height: 2 * s,
-                color: _kDefaultHighlightColor,
+                color: _midDown ? _kTapDownColor : _kDefaultHighlightColor,
               ),
               SizedBox(height: 3 * s),
               Container(
                 width: 8 * s,
                 height: 2 * s,
-                color: _kDefaultHighlightColor,
+                color: _midDown ? _kTapDownColor : _kDefaultHighlightColor,
               ),
               SizedBox(height: 3 * s),
               Container(
                 width: 6 * s,
                 height: 2 * s,
-                color: _kDefaultHighlightColor,
+                color: _midDown ? _kTapDownColor : _kDefaultHighlightColor,
               ),
             ],
           ),
@@ -860,9 +882,6 @@ class _MouseBodyState extends State<MouseBody> {
   @override
   Widget build(BuildContext context) {
     final s = widget.scale;
-    final leftScale = WidgetScale.getScale(_leftDown, s);
-    final rightScale = WidgetScale.getScale(_rightDown, s);
-    final midScale = WidgetScale.getScale(_midDown, s);
     return Row(
       children: [
         SizedBox(
@@ -880,12 +899,8 @@ class _MouseBodyState extends State<MouseBody> {
                       crossAxisAlignment: CrossAxisAlignment.end,
                       children: [
                         // Left button
-                        Transform.translate(
-                          offset: Offset(
-                              -(80 - 24) * 0.5 * leftScale.translateScale,
-                              -32 * leftScale.translateScale),
-                          child: SizedBox(
-                            width: (80 - 24) * 0.5 * leftScale.scale,
+                        SizedBox(
+                            width: (80 - 24) * 0.5 * s,
                             child: Listener(
                               onPointerMove: widget.onPointerMoveUpdate,
                               onPointerDown: widget.inputModel != null
@@ -914,26 +929,34 @@ class _MouseBodyState extends State<MouseBody> {
                                         widget.cancelCanvasScroll?.call();
                                       })
                                   : null,
-                              child: Container(
-                                decoration: BoxDecoration(
-                                  color: _leftDown
-                                      ? _kTapDownColor
-                                      : _kDefaultColor,
+                              child: Padding(
+                                padding: EdgeInsets.only(right: 4 * s),
+                                child: ClipRRect(
                                   borderRadius: BorderRadius.only(
                                       topLeft: Radius.circular(22 * s)),
+                                  child: BackdropFilter(
+                                    filter: ui.ImageFilter.blur(sigmaX: 10, sigmaY: 10),
+                                    child: Container(
+                                      decoration: BoxDecoration(
+                                        color: _leftDown
+                                            ? _kTapDownColor
+                                            : const Color(0x80FEFEFE),
+                                        borderRadius: BorderRadius.only(
+                                            topLeft: Radius.circular(22 * s)),
+                                        border: Border.all(
+                                          color: const Color(0x4DFFFFFF),
+                                          width: 2,
+                                        ),
+                                      ),
+                                    ),
+                                  ),
                                 ),
-                                margin: EdgeInsets.only(right: 0.5 * s),
                               ),
                             ),
-                          ),
                         ),
                         const Spacer(),
-                        Transform.translate(
-                          offset: Offset(
-                              (80 - 24) * 0.5 * rightScale.translateScale,
-                              -32 * rightScale.translateScale),
-                          child: SizedBox(
-                            width: (80 - 24) * 0.5 * rightScale.scale,
+                        SizedBox(
+                            width: (80 - 24) * 0.5 * s,
                             child: Listener(
                               onPointerMove: widget.onPointerMoveUpdate,
                               onPointerDown: widget.inputModel != null
@@ -962,18 +985,30 @@ class _MouseBodyState extends State<MouseBody> {
                                         widget.cancelCanvasScroll?.call();
                                       })
                                   : null,
-                              child: Container(
-                                decoration: BoxDecoration(
-                                  color: _rightDown
-                                      ? _kTapDownColor
-                                      : _kDefaultColor,
+                              child: Padding(
+                                padding: EdgeInsets.only(left: 4 * s),
+                                child: ClipRRect(
                                   borderRadius: BorderRadius.only(
                                       topRight: Radius.circular(22 * s)),
+                                  child: BackdropFilter(
+                                    filter: ui.ImageFilter.blur(sigmaX: 10, sigmaY: 10),
+                                    child: Container(
+                                      decoration: BoxDecoration(
+                                        color: _rightDown
+                                            ? _kTapDownColor
+                                            : const Color(0x80FEFEFE),
+                                        borderRadius: BorderRadius.only(
+                                            topRight: Radius.circular(22 * s)),
+                                        border: Border.all(
+                                          color: const Color(0x4DFFFFFF),
+                                          width: 2,
+                                        ),
+                                      ),
+                                    ),
+                                  ),
                                 ),
-                                margin: EdgeInsets.only(left: 0.5 * s),
                               ),
                             ),
-                          ),
                         ),
                       ],
                     ),
@@ -982,36 +1017,53 @@ class _MouseBodyState extends State<MouseBody> {
                       left: (80 * s - 22 * s) / 2,
                       top: 0,
                       child: Transform.translate(
-                        offset: Offset(0, -2 * s),
-                        child: Container(
-                          width: 22 * s,
-                          height: 67 * s,
-                          decoration: BoxDecoration(
-                            color: Colors.grey.withOpacity(0.7),
-                            borderRadius: BorderRadius.vertical(
-                              top: Radius.circular(12 * s),
-                              bottom: Radius.circular(16 * s),
-                            ),
+                        offset: Offset(0, -7 * s),
+                        child: ClipRRect(
+                          borderRadius: BorderRadius.vertical(
+                            top: Radius.circular(12 * s),
+                            bottom: Radius.circular(12 * s),
                           ),
-                          padding: EdgeInsets.symmetric(vertical: 2 * s),
-                          child: Column(
-                            mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                          child: BackdropFilter(
+                            filter: ui.ImageFilter.blur(sigmaX: 10, sigmaY: 10),
+                            child: Container(
+                              width: 22 * s,
+                              height: 65 * s,
+                              decoration: BoxDecoration(
+                                color: const Color(0x80FEFEFE),
+                                borderRadius: BorderRadius.vertical(
+                                  top: Radius.circular(12 * s),
+                                  bottom: Radius.circular(12 * s),
+                                ),
+                                border: Border.all(
+                                  color: const Color(0x4DFFFFFF),
+                                  width: 2,
+                                ),
+                              ),
+                              child: Transform.translate(
+                                offset: Offset(0, -2 * s),
+                                child: Column(
+                            mainAxisAlignment: MainAxisAlignment.center,
                             children: [
                               _buildScrollUpDown(widget.scrollWheelUpKey,
-                                  Icons.keyboard_arrow_up, midScale.scale),
-                              _buildScrollMidButton(midScale.scale),
+                                  Icons.keyboard_arrow_up, s, true),
+                              SizedBox(height: 2 * s),
+                              _buildScrollMidButton(s),
+                              SizedBox(height: 2 * s),
                               _buildScrollUpDown(widget.scrollWheelDownKey,
-                                  Icons.keyboard_arrow_down, midScale.scale),
+                                  Icons.keyboard_arrow_down, s, false),
                             ],
                           ),
                         ),
+                        ),
+                      ),
+                    ),
                       ),
                     ),
                   ],
                 ),
               ),
               // Thin gap separates upper and lower parts
-              SizedBox(height: 1 * s),
+              SizedBox(height: 5 * s),
               // Bottom part: drag area (top middle indentation)
               Expanded(
                 child: Listener(
@@ -1042,17 +1094,34 @@ class _MouseBodyState extends State<MouseBody> {
                         }
                       : null,
                   behavior: HitTestBehavior.opaque,
-                  child: CustomPaint(
-                    painter: DragAreaTopIndentPainter(
-                        color: _dragDown ? _kTapDownColor : _kDefaultColor,
-                        scale: widget.scale),
-                    child: Container(
-                      width: 80 * s,
-                      alignment: Alignment.center,
-                      child: Transform.rotate(
-                        angle: pi / 2,
-                        child: Icon(Icons.drag_indicator,
-                            color: _kDefaultHighlightColor, size: 18 * s),
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.only(
+                      bottomLeft: Radius.circular(40 * s),
+                      bottomRight: Radius.circular(40 * s),
+                    ),
+                    child: BackdropFilter(
+                      filter: ui.ImageFilter.blur(sigmaX: 10, sigmaY: 10),
+                      child: Container(
+                        width: 80 * s,
+                        alignment: Alignment.center,
+                        decoration: BoxDecoration(
+                          color: _dragDown
+                              ? _kTapDownColor
+                              : const Color(0x80FEFEFE),
+                          borderRadius: BorderRadius.only(
+                            bottomLeft: Radius.circular(40 * s),
+                            bottomRight: Radius.circular(40 * s),
+                          ),
+                          border: Border.all(
+                            color: const Color(0x4DFFFFFF),
+                            width: 2,
+                          ),
+                        ),
+                        child: Transform.rotate(
+                          angle: pi / 2,
+                          child: Icon(Icons.drag_indicator,
+                              color: _kDefaultHighlightColor, size: 18 * s),
+                        ),
                       ),
                     ),
                   ),

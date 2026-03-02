@@ -316,8 +316,163 @@ void changeWhiteList({Function()? callback}) async {
       );
     }
 
+    // IP 항목 위젯 빌더
+    Widget buildIpItem(int index) {
+      final ip = ipList[index];
+      final isSelected = selectedIndices.contains(index);
+      return Padding(
+        padding: const EdgeInsets.symmetric(vertical: 4),
+        child: Row(
+          children: [
+            SizedBox(
+              width: 24,
+              height: 24,
+              child: Checkbox(
+                value: isSelected,
+                onChanged: isOptFixed
+                    ? null
+                    : (val) {
+                        setState(() {
+                          if (val == true) {
+                            selectedIndices.add(index);
+                          } else {
+                            selectedIndices.remove(index);
+                          }
+                        });
+                      },
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(4),
+                ),
+                side: const BorderSide(color: Color(0xFFE0E0E0)),
+                activeColor: const Color(0xFF4B7BF5),
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Text(
+                ip,
+                style: const TextStyle(
+                  fontSize: 14,
+                  color: Color(0xFF454447),
+                ),
+              ),
+            ),
+            if (!isOptFixed)
+              _HoverIcon(
+                assetPath: 'assets/icons/ip-white-list-edit.svg',
+                normalColor: const Color(0xFF8F8E95),
+                hoverColor: const Color(0xFF5F71FF),
+                onTap: () {
+                  setState(() {
+                    editingIndex = index;
+                    editController.text = ip;
+                    editMsg = "";
+                  });
+                },
+              ),
+            if (!isOptFixed)
+              _HoverIcon(
+                assetPath: 'assets/icons/ip-white-list-del.svg',
+                normalColor: const Color(0xFFFE3E3E),
+                hoverColor: const Color(0xFF5F71FF),
+                onTap: () {
+                  setState(() {
+                    ipList.removeAt(index);
+                    selectedIndices.remove(index);
+                    selectedIndices = selectedIndices
+                        .map((i) => i > index ? i - 1 : i)
+                        .toSet();
+                  });
+                },
+              ),
+          ],
+        ),
+      );
+    }
+
+    // 전체 선택 체크박스 위젯
+    Widget buildSelectAll() {
+      if (ipList.isEmpty) return const SizedBox.shrink();
+      return Padding(
+        padding: const EdgeInsets.symmetric(vertical: 4),
+        child: Row(
+          children: [
+            SizedBox(
+              width: 24,
+              height: 24,
+              child: Checkbox(
+                value: ipList.isNotEmpty &&
+                    selectedIndices.length == ipList.length,
+                tristate: false,
+                onChanged: isOptFixed
+                    ? null
+                    : (val) {
+                        setState(() {
+                          if (val == true) {
+                            selectedIndices = Set<int>.from(
+                                List.generate(ipList.length, (i) => i));
+                          } else {
+                            selectedIndices.clear();
+                          }
+                        });
+                      },
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(4),
+                ),
+                side: const BorderSide(color: Color(0xFFE0E0E0)),
+                activeColor: const Color(0xFF4B7BF5),
+              ),
+            ),
+            const SizedBox(width: 12),
+            Text(
+              translate("IP Address"),
+              style: const TextStyle(
+                fontSize: 13,
+                color: Color(0xFF8F8E95),
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    // 하단 버튼
+    Widget buildButtons() {
+      return Row(
+        children: [
+          Expanded(
+            child: StyledOutlinedButton(
+              label: translate("Cancel"),
+              onPressed: close,
+            ),
+          ),
+          if (!isOptFixed) ...[
+            const SizedBox(width: 12),
+            Expanded(
+              child: StyledCompactButton(
+                label: translate("Save"),
+                onPressed: () async {
+                  final newWhiteList = ipList.isEmpty
+                      ? defaultOptionWhitelist
+                      : ipList.join(',');
+                  await bind.mainSetOption(
+                      key: kOptionWhitelist, value: newWhiteList);
+                  callback?.call();
+                  close();
+                },
+                fillWidth: true,
+              ),
+            ),
+          ],
+        ],
+      );
+    }
+
     // 메인 IP 리스트 다이얼로그
+    final dialogHeight = isDesktop ? null : MediaQuery.of(context).size.height * 0.65;
+
     return CustomAlertDialog(
+      scrollable: isDesktop ? true : false,
       title: Text(
         translate("IP Whitelisting"),
         style: const TextStyle(
@@ -328,8 +483,9 @@ void changeWhiteList({Function()? callback}) async {
       ),
       content: SizedBox(
         width: 360,
+        height: dialogHeight?.toDouble(),
         child: Column(
-          mainAxisSize: MainAxisSize.min,
+          mainAxisSize: isDesktop ? MainAxisSize.min : MainAxisSize.max,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             // 부제목
@@ -365,9 +521,13 @@ void changeWhiteList({Function()? callback}) async {
                     child: TextField(
                       controller: inputController,
                       enabled: !isOptFixed,
+                      style: TextStyle(fontSize: isDesktop ? 14 : 13),
                       decoration: InputDecoration(
                         hintText: translate("IP Whitelisting Inputpre"),
-                        hintStyle: const TextStyle(color: Color(0xFFB0B0B0)),
+                        hintStyle: TextStyle(
+                          color: const Color(0xFFB0B0B0),
+                          fontSize: isDesktop ? 14 : 13,
+                        ),
                         border: OutlineInputBorder(
                           borderRadius: BorderRadius.circular(8),
                           borderSide: BorderSide(
@@ -394,11 +554,12 @@ void changeWhiteList({Function()? callback}) async {
                 ),
                 const SizedBox(width: 12),
                 SizedBox(
-                  width: 120,
+                  width: isDesktop ? 120 : 80,
                   height: 52,
                   child: StyledOutlinedButton(
                     label: translate("Register"),
-                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 0),
+                    fontSize: isDesktop ? 14 : 13,
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 0),
                     onPressed: isOptFixed
                         ? null
                         : () {
@@ -436,7 +597,7 @@ void changeWhiteList({Function()? callback}) async {
                   style: const TextStyle(color: Colors.red, fontSize: 13),
                 ),
               ),
-            SizedBox(height: msg.isNotEmpty ? 16 : 24),
+            SizedBox(height: msg.isNotEmpty ? 12 : 20),
 
             // 등록된 IP 주소 헤더
             Row(
@@ -468,137 +629,33 @@ void changeWhiteList({Function()? callback}) async {
                   ),
               ],
             ),
-            const SizedBox(height: 12),
+            const SizedBox(height: 8),
 
-            // IP 목록
-            Container(
-              constraints: const BoxConstraints(maxHeight: 200),
-              child: ipList.isEmpty
-                  ? Center(
-                      child: Padding(
-                        padding: const EdgeInsets.all(20),
+            // 전체 선택 체크박스
+            buildSelectAll(),
+
+            // IP 목록 (스크롤 가능)
+            if (isDesktop)
+              ...ipList.asMap().entries.map((e) => buildIpItem(e.key)).toList()
+            else
+              Expanded(
+                child: ipList.isEmpty
+                    ? Center(
                         child: Text(
                           translate("Empty"),
                           style: const TextStyle(color: Color(0xFF8F8E95)),
                         ),
+                      )
+                    : ListView.builder(
+                        padding: EdgeInsets.zero,
+                        itemCount: ipList.length,
+                        itemBuilder: (ctx, index) => buildIpItem(index),
                       ),
-                    )
-                  : ListView.builder(
-                      shrinkWrap: true,
-                      itemCount: ipList.length,
-                      itemBuilder: (ctx, index) {
-                        final ip = ipList[index];
-                        final isSelected = selectedIndices.contains(index);
-                        return Padding(
-                          padding: const EdgeInsets.symmetric(vertical: 6),
-                          child: Row(
-                            children: [
-                              // 체크박스
-                              SizedBox(
-                                width: 24,
-                                height: 24,
-                                child: Checkbox(
-                                  value: isSelected,
-                                  onChanged: isOptFixed
-                                      ? null
-                                      : (val) {
-                                          setState(() {
-                                            if (val == true) {
-                                              selectedIndices.add(index);
-                                            } else {
-                                              selectedIndices.remove(index);
-                                            }
-                                          });
-                                        },
-                                  shape: RoundedRectangleBorder(
-                                    borderRadius: BorderRadius.circular(4),
-                                  ),
-                                  side: const BorderSide(
-                                      color: Color(0xFFE0E0E0)),
-                                  activeColor: const Color(0xFF4B7BF5),
-                                ),
-                              ),
-                              const SizedBox(width: 12),
-                              // IP 주소
-                              Expanded(
-                                child: Text(
-                                  ip,
-                                  style: const TextStyle(
-                                    fontSize: 14,
-                                    color: Color(0xFF454447),
-                                  ),
-                                ),
-                              ),
-                              // 수정 아이콘
-                              if (!isOptFixed)
-                                _HoverIcon(
-                                  assetPath:
-                                      'assets/icons/ip-white-list-edit.svg',
-                                  normalColor: const Color(0xFF8F8E95),
-                                  hoverColor: const Color(0xFF5F71FF),
-                                  onTap: () {
-                                    setState(() {
-                                      editingIndex = index;
-                                      editController.text = ip;
-                                      editMsg = "";
-                                    });
-                                  },
-                                ),
-                              // 삭제 아이콘
-                              if (!isOptFixed)
-                                _HoverIcon(
-                                  assetPath:
-                                      'assets/icons/ip-white-list-del.svg',
-                                  normalColor: const Color(0xFFFE3E3E),
-                                  hoverColor: const Color(0xFF5F71FF),
-                                  onTap: () {
-                                    setState(() {
-                                      ipList.removeAt(index);
-                                      selectedIndices.remove(index);
-                                      // 인덱스 조정
-                                      selectedIndices = selectedIndices
-                                          .map((i) => i > index ? i - 1 : i)
-                                          .toSet();
-                                    });
-                                  },
-                                ),
-                            ],
-                          ),
-                        );
-                      },
-                    ),
-            ),
-            const SizedBox(height: 24),
+              ),
+            const SizedBox(height: 16),
 
-            // 하단 버튼
-            Row(
-              children: [
-                Expanded(
-                  child: StyledOutlinedButton(
-                    label: translate("Cancel"),
-                    onPressed: close,
-                  ),
-                ),
-                if (!isOptFixed) ...[
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: StyledCompactButton(
-                      label: translate("Save"),
-                      onPressed: () async {
-                        final newWhiteList = ipList.isEmpty
-                            ? defaultOptionWhitelist
-                            : ipList.join(',');
-                        await bind.mainSetOption(
-                            key: kOptionWhitelist, value: newWhiteList);
-                        callback?.call();
-                        close();
-                      },
-                      fillWidth: true,
-                    ),
-                  ),
-                ],
-              ],
-            ),
+            // 하단 버튼 (고정)
+            buildButtons(),
           ],
         ),
       ),
@@ -1702,36 +1759,21 @@ void showRestartRemoteDevice(PeerInfo pi, String id, SessionID sessionId,
               ),
             ),
             content: Text(
-              translate('Are you sure you want to restart?'),
+              isDesktop
+                  ? translate('Are you sure you want to restart?').replaceAll('\n', ' ')
+                  : translate('Are you sure you want to restart?'),
               style: const TextStyle(fontSize: 14),
             ),
             actions: [
               Row(
                 children: [
                   Expanded(
-                    child: StyledOutlinedButton(
-                      label: translate('Cancel'),
-                      onPressed: close,
-                      padding: const EdgeInsets.symmetric(vertical: 14),
-                    ),
+                    child: dialogButton('Cancel',
+                        onPressed: close, isOutline: true),
                   ),
                   const SizedBox(width: 12),
                   Expanded(
-                    child: ElevatedButton(
-                      onPressed: () => close(true),
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: MyTheme.accent,
-                        padding: const EdgeInsets.symmetric(vertical: 14),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(8),
-                        ),
-                      ),
-                      child: Text(
-                        translate('OK'),
-                        style:
-                            const TextStyle(color: Colors.white, fontSize: 16),
-                      ),
-                    ),
+                    child: dialogButton('OK', onPressed: () => close(true)),
                   ),
                 ],
               ),

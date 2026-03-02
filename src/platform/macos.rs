@@ -165,6 +165,123 @@ pub fn install_service() -> bool {
     is_installed_daemon(false)
 }
 
+/// Try to acquire exclusive GUI lock using flock (atomic, race-free).
+/// Returns true if lock acquired, false if another GUI holds it.
+/// Lock auto-releases when process exits (OS cleans up fd).
+pub fn try_acquire_gui_lock() -> bool {
+    use std::os::unix::io::IntoRawFd;
+    let Ok(file) = std::fs::OpenOptions::new()
+        .write(true)
+        .create(true)
+        .open("/tmp/onedesk_gui.lock")
+    else {
+        return true; // can't create lock, proceed anyway
+    };
+    let fd = file.into_raw_fd();
+    // LOCK_EX | LOCK_NB = exclusive non-blocking
+    let result = unsafe { libc::flock(fd, libc::LOCK_EX | libc::LOCK_NB) };
+    if result == 0 {
+        // Lock acquired. Don't close fd - keeps lock until process exits.
+        log::info!("GUI lock acquired (PID {})", std::process::id());
+        true
+    } else {
+        log::info!("Another GUI is already running, exiting");
+        unsafe { libc::close(fd); }
+        false
+    }
+}
+
+/// Check if the GUI lock file is held by another process (GUI is running).
+/// Does NOT acquire the lock — only checks. Safe to call from --server process.
+pub fn is_gui_lock_held() -> bool {
+    use std::os::unix::io::AsRawFd;
+    let Ok(file) = std::fs::OpenOptions::new()
+        .write(true)
+        .open("/tmp/onedesk_gui.lock")
+    else {
+        return false;
+    };
+    let fd = file.as_raw_fd();
+    let result = unsafe { libc::flock(fd, libc::LOCK_EX | libc::LOCK_NB) };
+    if result == 0 {
+        // We acquired the lock — no GUI is running. Release it immediately.
+        unsafe { libc::flock(fd, libc::LOCK_UN) };
+        false
+    } else {
+        // Lock held by another process — GUI is running.
+        true
+    }
+    // file dropped here, fd closed automatically
+}
+
+/// Try to auto-start the daemon and agent on app startup.
+/// If plist files were removed (e.g. user stopped service), restore them from embedded resources
+/// and reload. Always clears stop-service flag.
+pub fn try_start_daemon_if_not_running() {
+    // Clear stop-service flag in local config.
+    hbb_common::config::Config::set_option("stop-service".into(), "".into());
+
+    let full_name = crate::get_full_name();
+
+    // Daemon plist
+    let daemon_label = format!("{}_service", full_name);
+    let daemon_plist_path = format!("/Library/LaunchDaemons/{}.plist", daemon_label);
+
+    // Agent plist
+    let agent_label = format!("{}_server", full_name);
+    let agent_plist_path = format!("/Library/LaunchAgents/{}.plist", agent_label);
+
+    let daemon_exists = std::path::Path::new(&daemon_plist_path).exists();
+    let agent_exists = std::path::Path::new(&agent_plist_path).exists();
+
+    // Check if the daemon (service) process is already running.
+    // launchctl list as regular user cannot see LaunchDaemons (root-level),
+    // so use pgrep to check the actual process instead.
+    let service_running = std::process::Command::new("pgrep")
+        .args(&["-x", "service"])
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false);
+
+    if service_running {
+        log::info!("Daemon service process is already running, skipping admin prompt");
+    } else if !daemon_exists || !agent_exists {
+        // Plist files missing — reinstall via osascript (shows admin password dialog)
+        log::info!("Plist files missing (daemon={}, agent={}), attempting to reinstall", daemon_exists, agent_exists);
+        is_installed_daemon(true);
+        std::thread::sleep(std::time::Duration::from_secs(3));
+    } else {
+        // Plist exists but service not running — let launchd handle it (KeepAlive=true).
+        // Do NOT prompt admin password on every startup.
+        log::info!("Daemon service not running but plist exists, launchd will auto-restart (KeepAlive=true)");
+    }
+
+    // Ensure agent is loaded in launchd (for background operation after GUI exits).
+    // Do NOT unload+reload — that restarts the agent process, which conflicts with
+    // the GUI's in-process server and kills the GUI via IPC Data::Close.
+    if std::path::Path::new(&agent_plist_path).exists() {
+        let agent_loaded = std::process::Command::new("launchctl")
+            .args(&["list", &agent_label])
+            .output()
+            .map(|o| o.status.success())
+            .unwrap_or(false);
+
+        if !agent_loaded {
+            log::info!("Agent not loaded in launchd, loading: {}", agent_plist_path);
+            let _ = std::process::Command::new("launchctl")
+                .args(&["load", "-w", &agent_plist_path])
+                .status();
+        } else {
+            log::info!("Agent {} is already loaded in launchd", agent_label);
+        }
+    }
+
+    // Notify via IPC to clear stop-service flag.
+    // GUI's in-process server should already be running at this point.
+    std::thread::sleep(std::time::Duration::from_secs(1));
+    crate::ipc::set_option("stop-service", "");
+}
+
 // Remember to check if `update_daemon_agent()` need to be changed if changing `is_installed_daemon()`.
 // No need to merge the existing dup code, because the code in these two functions are too critical.
 // New code should be written in a common function.
@@ -344,10 +461,6 @@ pub fn uninstall_service(show_new_window: bool, sync: bool) -> bool {
                         std::thread::sleep(std::time::Duration::from_millis(300));
                     }
                     crate::ipc::set_option("stop-service", "Y");
-                    std::process::Command::new("launchctl")
-                        .args(&["remove", &format!("{}_server", crate::get_full_name())])
-                        .status()
-                        .ok();
                     if show_new_window {
                         std::process::Command::new("open")
                             .arg("-n")
@@ -357,6 +470,22 @@ pub fn uninstall_service(show_new_window: bool, sync: bool) -> bool {
                         // leave open a little time
                         std::thread::sleep(std::time::Duration::from_millis(300));
                     }
+                    // Spawn a fully detached cleanup script using background subshell.
+                    // (...)& makes the inner subshell run independently - the outer sh
+                    // exits immediately, and the subshell is reparented to PID 1.
+                    // This ensures killall survives even after launchctl remove kills --server.
+                    let app_name = crate::get_app_name();
+                    let full_name = crate::get_full_name();
+                    std::process::Command::new("sh")
+                        .arg("-c")
+                        .arg(&format!(
+                            "(launchctl remove {full_name}_server 2>/dev/null; sleep 0.5; killall -9 {app_name} 2>/dev/null; pkill -9 -f {app_name}.app 2>/dev/null) &",
+                        ))
+                        .stdin(std::process::Stdio::null())
+                        .stdout(std::process::Stdio::null())
+                        .stderr(std::process::Stdio::null())
+                        .spawn()
+                        .ok();
                     quit_gui();
                 }
             }
@@ -950,6 +1079,62 @@ pub fn handle_application_should_open_untitled_file() {
     if x == "--server" || x == "--cm" || x == "--tray" {
         std::thread::spawn(move || crate::handle_url_scheme("".to_lowercase()));
     }
+}
+
+/// Override tao's NSApp delegate to handle applicationShouldHandleReopen.
+/// When the user clicks the app in Finder/Launchpad while --server is running,
+/// macOS sends a reopen event. We override the delegate method to launch a GUI.
+pub fn setup_reopen_handler() {
+    unsafe {
+        let app: id = msg_send![class!(NSApplication), sharedApplication];
+        let delegate: id = msg_send![app, delegate];
+        if delegate == nil {
+            log::warn!("No NSApp delegate found, skipping reopen handler setup");
+            return;
+        }
+        let cls = (*delegate).class();
+        let sel = sel!(applicationShouldHandleReopen:hasVisibleWindows:);
+
+        // Use objc runtime to replace or add the method
+        let method: *mut std::ffi::c_void =
+            objc::runtime::class_getInstanceMethod(cls, sel) as *mut std::ffi::c_void;
+        let imp: objc::runtime::Imp = std::mem::transmute(
+            handle_reopen as extern "C" fn(&objc::runtime::Object, objc::runtime::Sel, id, BOOL) -> BOOL
+        );
+        if !method.is_null() {
+            objc::runtime::method_setImplementation(
+                method as *mut _,
+                imp,
+            );
+            log::info!("Reopen handler installed on tao delegate");
+        } else {
+            let types = std::ffi::CString::new("B@:@B").unwrap();
+            let added = objc::runtime::class_addMethod(
+                cls as *const _ as *mut objc::runtime::Class,
+                sel,
+                imp,
+                types.as_ptr(),
+            );
+            if added {
+                log::info!("Reopen handler added to tao delegate");
+            } else {
+                log::error!("Failed to add reopen handler");
+            }
+        }
+    }
+}
+
+extern "C" fn handle_reopen(
+    _this: &objc::runtime::Object,
+    _sel: objc::runtime::Sel,
+    _app: id,
+    _has_visible_windows: BOOL,
+) -> BOOL {
+    log::info!("applicationShouldHandleReopen triggered, launching GUI");
+    std::thread::spawn(|| {
+        crate::handle_url_scheme("".to_string());
+    });
+    NO
 }
 
 /// Get all resolutions of the display. The resolutions are:

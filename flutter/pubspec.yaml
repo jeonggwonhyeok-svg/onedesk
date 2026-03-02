@@ -84,7 +84,7 @@ dependencies:
   bot_toast: ^4.0.3
   win32: any
   password_strength: ^0.2.0
-  flutter_launcher_icons: ^0.13.1
+  flutter_launcher_icons: ^0.14.4
   flutter_keyboard_visibility: ^5.4.0
   texture_rgba_renderer:
     git:
@@ -133,6 +133,9 @@ flutter_icons:
   remove_alpha_ios: true
   android: true
   ios: true
+  image_path_ios_dark_transparent: "../res/icon-transparent.png"
+  image_path_ios_tinted_grayscale: "../res/icon-transparent.png"
+  desaturate_tinted_to_grayscale_ios: true
   windows:
     generate: true
   macos:

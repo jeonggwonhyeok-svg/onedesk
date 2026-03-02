@@ -258,7 +258,7 @@ void runMultiWindow(
   _runApp(
     title,
     widget,
-    MyTheme.currentThemeMode(),
+    ThemeMode.light,
   );
   // we do not hide titlebar on win7 because of the frame overflow.
   if (kUseCompatibleUiMode) {
@@ -317,7 +317,7 @@ void runConnectionManagerScreen() async {
   _runApp(
     '',
     const DesktopServerPage(),
-    MyTheme.currentThemeMode(),
+    ThemeMode.light,
   );
   debugPrint('[CM] _runApp completed');
   final hide = await bind.cmGetConfig(name: "hide_cm") == 'true';
@@ -396,7 +396,16 @@ void _runApp(
   Widget home,
   ThemeMode themeMode,
 ) {
+  // 모바일 상태바 배경색 설정
+  if (Platform.isAndroid || Platform.isIOS) {
+    SystemChrome.setSystemUIOverlayStyle(const SystemUiOverlayStyle(
+      statusBarColor: Color(0xFFFEFEFE),
+      statusBarIconBrightness: Brightness.dark,
+      statusBarBrightness: Brightness.light, // iOS
+    ));
+  }
   final botToastBuilder = BotToastInit();
+  final isMobile = Platform.isAndroid || Platform.isIOS;
   runApp(RefreshWrapper(
     builder: (context) => GetMaterialApp(
       navigatorKey: globalKey,
@@ -404,8 +413,17 @@ void _runApp(
       title: title,
       theme: MyTheme.lightTheme,
       darkTheme: MyTheme.darkTheme,
-      themeMode: themeMode,
-      home: home,
+      themeMode: ThemeMode.light,
+      home: isMobile
+          ? AnnotatedRegion<SystemUiOverlayStyle>(
+              value: const SystemUiOverlayStyle(
+                statusBarColor: Color(0xFFFEFEFE),
+                statusBarIconBrightness: Brightness.dark,
+                statusBarBrightness: Brightness.light,
+              ),
+              child: home,
+            )
+          : home,
       localizationsDelegates: const [
         GlobalMaterialLocalizations.delegate,
         GlobalWidgetsLocalizations.delegate,
@@ -452,7 +470,7 @@ void runPlanSelectionScreen(Map<String, dynamic> argument) async {
   _runApp(
     title,
     DesktopPlanSelectionScreen(params: argument),
-    MyTheme.currentThemeMode(),
+    ThemeMode.light,
   );
   WindowController.fromWindowId(kWindowId!).show();
 }
@@ -472,7 +490,7 @@ void runVoiceCallDialogScreen(Map<String, dynamic> argument) async {
       clientName: clientName,
       clientPeerId: clientPeerId,
     ),
-    MyTheme.currentThemeMode(),
+    ThemeMode.light,
   );
   WindowController.fromWindowId(kWindowId!).show();
 }
@@ -492,7 +510,7 @@ void runCameraRequestDialogScreen(Map<String, dynamic> argument) async {
       clientName: clientName,
       clientPeerId: clientPeerId,
     ),
-    MyTheme.currentThemeMode(),
+    ThemeMode.light,
   );
   WindowController.fromWindowId(kWindowId!).show();
 }
@@ -529,23 +547,12 @@ class _AppState extends State<App> with WidgetsBindingObserver {
   void initState() {
     super.initState();
     WidgetsBinding.instance.window.onPlatformBrightnessChanged = () {
-      final userPreference = MyTheme.getThemeModePreference();
-      if (userPreference != ThemeMode.system) return;
-      WidgetsBinding.instance.handlePlatformBrightnessChanged();
-      final systemIsDark =
-          WidgetsBinding.instance.platformDispatcher.platformBrightness ==
-              Brightness.dark;
-      final ThemeMode to;
-      if (systemIsDark) {
-        to = ThemeMode.dark;
-      } else {
-        to = ThemeMode.light;
-      }
-      Get.changeThemeMode(to);
+      // 라이트 모드 고정
+      Get.changeThemeMode(ThemeMode.light);
       // Synchronize the window theme of the system.
       updateSystemWindowTheme();
       if (desktopType == DesktopType.main) {
-        bind.mainChangeTheme(dark: to.toShortString());
+        bind.mainChangeTheme(dark: ThemeMode.light.toShortString());
       }
     };
     WidgetsBinding.instance.addObserver(this);
@@ -601,12 +608,19 @@ class _AppState extends State<App> with WidgetsBindingObserver {
               : bind.mainGetAppNameSync(),
           theme: MyTheme.lightTheme,
           darkTheme: MyTheme.darkTheme,
-          themeMode: MyTheme.currentThemeMode(),
+          themeMode: ThemeMode.light,
           home: isDesktop
               ? const AuthWrapper()
               : isWeb
                   ? WebHomePage()
-                  : const MobileAuthWrapper(),
+                  : const AnnotatedRegion<SystemUiOverlayStyle>(
+                      value: SystemUiOverlayStyle(
+                        statusBarColor: Color(0xFFFEFEFE),
+                        statusBarIconBrightness: Brightness.dark,
+                        statusBarBrightness: Brightness.light,
+                      ),
+                      child: MobileAuthWrapper(),
+                    ),
           localizationsDelegates: const [
             GlobalMaterialLocalizations.delegate,
             GlobalWidgetsLocalizations.delegate,

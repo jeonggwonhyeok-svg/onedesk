@@ -842,7 +842,7 @@ class InputModel {
 
   /// Send mouse press event.
   Future<void> sendMouse(String type, MouseButtons button) async {
-    if (!keyboardPerm) return;
+    if (isViewOnly) return;
     if (isViewCamera) return;
     await bind.sessionSendMouse(
         sessionId: sessionId,
@@ -869,7 +869,7 @@ class InputModel {
 
   /// Send mouse movement event with distance in [x] and [y].
   Future<void> moveMouse(double x, double y) async {
-    if (!keyboardPerm) return;
+    if (isViewOnly) return;
     if (isViewCamera) return;
     var x2 = x.toInt();
     var y2 = y.toInt();

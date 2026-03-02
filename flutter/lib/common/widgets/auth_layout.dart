@@ -89,21 +89,44 @@ class AuthBrandLogo extends StatelessWidget {
 /// 인증 페이지 레이아웃 (브랜드 영역 + 폼 영역 + 타이틀바)
 class AuthPageLayout extends StatelessWidget {
   final Widget formContent;
+  final Widget? mobileHeader; // 모바일에서 상단 고정 헤더
 
   const AuthPageLayout({
     Key? key,
     required this.formContent,
+    this.mobileHeader,
   }) : super(key: key);
 
   @override
   Widget build(BuildContext context) {
-    // 모바일: 폼만 전체 화면으로 표시
+    // 모바일: 폼만 전체 화면으로 표시 (키보드 올라와도 스크롤 가능)
     if (!isDesktop) {
       return Scaffold(
+        resizeToAvoidBottomInset: true,
         body: SafeArea(
           child: Padding(
             padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
-            child: formContent,
+            child: Column(
+              children: [
+                // 상단 고정 헤더
+                if (mobileHeader != null) mobileHeader!,
+                // 스크롤 가능한 폼 영역
+                Expanded(
+                  child: LayoutBuilder(
+                    builder: (context, constraints) {
+                      return SingleChildScrollView(
+                        child: ConstrainedBox(
+                          constraints: BoxConstraints(minHeight: constraints.maxHeight),
+                          child: IntrinsicHeight(
+                            child: formContent,
+                          ),
+                        ),
+                      );
+                    },
+                  ),
+                ),
+              ],
+            ),
           ),
         ),
       );

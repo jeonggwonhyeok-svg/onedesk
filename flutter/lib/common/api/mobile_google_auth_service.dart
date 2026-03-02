@@ -55,7 +55,7 @@ class MobileGoogleAuthService {
                 if (!pickupRes.success) {
                   completer.complete(MobileGoogleAuthResult(
                     success: false,
-                    error: 'Token authentication failed',
+                    error: 'Bad Request',
                   ));
                   return;
                 }
@@ -65,7 +65,7 @@ class MobileGoogleAuthService {
                 if (!meRes.success || meRes.data == null) {
                   completer.complete(MobileGoogleAuthResult(
                     success: false,
-                    error: 'Failed to get user info',
+                    error: 'Bad Request',
                   ));
                   return;
                 }
@@ -106,7 +106,7 @@ class MobileGoogleAuthService {
                 debugPrint('[MobileGoogleAuth] Pickup error: $e');
                 completer.complete(MobileGoogleAuthResult(
                   success: false,
-                  error: e.toString(),
+                  error: 'Bad Request',
                 ));
               }
             },
@@ -125,7 +125,7 @@ class MobileGoogleAuthService {
       debugPrint('[MobileGoogleAuth] Error: $e');
       return MobileGoogleAuthResult(
         success: false,
-        error: e.toString(),
+        error: 'Bad Request',
       );
     }
   }
@@ -188,7 +188,8 @@ class _GoogleLoginWebViewState extends State<_GoogleLoginWebView> {
             fontWeight: FontWeight.w600,
           ),
         ),
-        centerTitle: true,
+        centerTitle: false,
+        titleSpacing: 0,
       ),
       body: Stack(
         children: [

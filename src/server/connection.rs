@@ -1169,6 +1169,12 @@ impl Connection {
 
     async fn on_open(&mut self, addr: SocketAddr) -> bool {
         log::debug!("#{} Connection opened from {}.", self.inner.id, addr);
+        // Reject connections if user is not logged in
+        // Use get_option_from_file to read fresh from disk (the --server process cache may be stale)
+        if hbb_common::config::LocalConfig::get_option_from_file("user_info").is_empty() {
+            self.send_login_error("Remote desktop is offline").await;
+            return false;
+        }
         if !self.check_whitelist(&addr).await {
             return false;
         }
@@ -1814,6 +1820,7 @@ impl Connection {
             recording: self.recording,
             block_input: self.block_input,
             from_switch: self.from_switch,
+            peer_platform: self.lr.my_platform.clone(),
         });
     }
 

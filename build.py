@@ -178,6 +178,11 @@ def make_parser():
             action='store_true',
             help='Enable feature screencapturekit'
         )
+        parser.add_argument(
+            '--pkg',
+            action='store_true',
+            help='Build macOS PKG installer instead of DMG'
+        )
     return parser
 
 
@@ -448,6 +453,43 @@ def build_flutter_dmg(version, features):
     os.chdir("..")
 
 
+def build_flutter_pkg(version, features):
+    if not skip_cargo:
+        system2(
+            f'MACOSX_DEPLOYMENT_TARGET=10.14 cargo build --features {features} --release')
+    system2(
+        "cp target/release/liblibonedesk.dylib target/release/libonedesk.dylib")
+    os.chdir('flutter')
+    system2('flutter build macos --release')
+    system2('cp -rf ../target/release/service ./build/macos/Build/Products/Release/OneDesk.app/Contents/MacOS/')
+    # Copy plist files to app bundle Resources for postinstall script
+    system2('cp ../src/platform/privileges_scripts/daemon.plist ./build/macos/Build/Products/Release/OneDesk.app/Contents/Resources/com.carriez.OneDesk_service.plist')
+    system2('cp ../src/platform/privileges_scripts/agent.plist ./build/macos/Build/Products/Release/OneDesk.app/Contents/Resources/com.carriez.OneDesk_server.plist')
+    # Ad-hoc sign before packaging
+    system2('codesign --force --deep --sign - ./build/macos/Build/Products/Release/OneDesk.app')
+    # Prepare pkg root with only OneDesk.app
+    system2('rm -rf /tmp/onedesk-pkg-root && mkdir -p /tmp/onedesk-pkg-root')
+    system2('cp -a ./build/macos/Build/Products/Release/OneDesk.app /tmp/onedesk-pkg-root/')
+    # Generate component plist and disable relocation
+    system2('pkgbuild --analyze --root /tmp/onedesk-pkg-root /tmp/onedesk-component.plist')
+    system2('/usr/libexec/PlistBuddy -c "Set :0:BundleIsRelocatable false" /tmp/onedesk-component.plist')
+    # Build PKG
+    system2(
+        f'pkgbuild --root /tmp/onedesk-pkg-root '
+        f'--component-plist /tmp/onedesk-component.plist '
+        f'--identifier com.carriez.onedesk '
+        f'--version {version} '
+        f'--install-location /Applications '
+        f'--scripts ../res/pkg/scripts '
+        f'onedesk-component.pkg')
+    system2(
+        f'productbuild --package onedesk-component.pkg '
+        f'../onedesk-{version}-aarch64.pkg')
+    system2('rm -f onedesk-component.pkg')
+    system2('rm -rf /tmp/onedesk-pkg-root /tmp/onedesk-component.plist')
+    os.chdir("..")
+
+
 def build_flutter_arch_manjaro(version, features):
     if not skip_cargo:
         system2(f'cargo build --features {features} --lib --release')
@@ -579,7 +621,10 @@ def main():
     else:
         if flutter:
             if osx:
-                build_flutter_dmg(version, features)
+                if getattr(args, 'pkg', False):
+                    build_flutter_pkg(version, features)
+                else:
+                    build_flutter_dmg(version, features)
                 pass
             else:
                 # system2(
