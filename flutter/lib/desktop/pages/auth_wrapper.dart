@@ -14,6 +14,7 @@ import '../../models/platform_model.dart';
 import '../../common/api/auth_service.dart';
 import '../../common/api/session_service.dart';
 import '../../common/widgets/styled_form_widgets.dart';
+import '../../utils/multi_window_manager.dart';
 import './login_page.dart';
 import './desktop_tab_page.dart';
 
