@@ -3852,12 +3852,11 @@ Widget _buildAddonPaymentAgreeText() {
 Future<void> showDesktopAddonSessionDialog() async {
   // 지역 확인
   bool isKorea = false;
-  // TODO: 테스트용 하드코딩 - 나중에 복원 필요
-  // if (isAuthServiceInitialized()) {
-  //   try {
-  //     isKorea = await getAuthService().checkIsKorea();
-  //   } catch (_) {}
-  // }
+  if (isAuthServiceInitialized()) {
+    try {
+      isKorea = await getAuthService().checkIsKorea();
+    } catch (_) {}
+  }
 
   // 가격 조회
   int krwUnitPrice = 1000;
@@ -4012,7 +4011,6 @@ void _showAddonWelcomeDialogStandalone(int krwUnitPrice) {
                 label: translate('OK'),
                 onPressed: isChecked.value ? () {
                   close();
-                  _startAddonWelcomePayment(krwUnitPrice, addonCount.value);
                 } : null,
               )),
             ),
