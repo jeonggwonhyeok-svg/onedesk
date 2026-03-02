@@ -409,7 +409,7 @@ pub fn set_option(key: String, value: String) {
                 return;
             }
         }
-        #[cfg(any(target_os = "windows", target_os = "linux"))]
+        #[cfg(target_os = "linux")]
         {
             if crate::platform::is_installed() {
                 if value == "Y" {
@@ -422,6 +422,24 @@ pub fn set_option(key: String, value: String) {
                     }
                 }
                 return;
+            }
+        }
+        #[cfg(target_os = "windows")]
+        {
+            if crate::platform::is_installed() {
+                // On Windows: hide/show tray instead of stopping/starting the service.
+                // The Windows service keeps running (auto-start); only rendezvous
+                // registration is toggled via the stop-service config flag.
+                // This avoids UAC prompts entirely.
+                if value == "Y" {
+                    crate::platform::windows::kill_tray_process();
+                } else {
+                    if !crate::check_process("--tray", true) {
+                        hbb_common::allow_err!(crate::run_me(vec!["--tray"]));
+                    }
+                }
+                // Fall through — let the config be saved so the rendezvous
+                // mediator picks up the online/offline change.
             }
         }
     } else if &key == "audio-input" {

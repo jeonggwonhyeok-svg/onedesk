@@ -3094,73 +3094,45 @@ pub fn is_service_running(service_name: &str) -> bool {
     }
 }
 
-/// Try to auto-start the Windows service if it is installed but not running.
-/// Called on normal app startup. Always attempts to start regardless of stop-service option.
+/// Kill any running tray process (same session).
+/// Called when the user clicks "Stop Service" — hides the tray without stopping the service.
+pub fn kill_tray_process() {
+    let mut path = std::env::current_exe().unwrap_or_default();
+    if let Ok(linked) = path.read_link() {
+        path = linked;
+    }
+    let filename = path
+        .file_name()
+        .unwrap_or_default()
+        .to_string_lossy()
+        .to_string();
+    let pids = get_pids_with_first_arg_by_wmic(&filename, "--tray");
+    let s = hbb_common::sysinfo::System::new_all();
+    for pid in pids {
+        if let Some(process) = s.process(pid) {
+            log::info!("Killing tray process pid={:?}", pid);
+            process.kill();
+        }
+    }
+}
+
+/// On app startup: clear the stop-service flag and show the tray.
+/// We no longer start/stop the Windows service from the app — the service
+/// is managed by Windows auto-start (set by the MSI installer).
+/// Online/offline status is controlled purely by the stop-service config flag.
 pub fn try_start_service_if_not_running() {
     if !is_installed() {
         return;
     }
 
-    // Clear stop-service flag so the server registers with rendezvous
+    // Clear stop-service flag so the rendezvous mediator registers the device as online.
     hbb_common::config::Config::set_option("stop-service".into(), "".into());
+    log::info!("Cleared stop-service flag, device will appear online.");
 
-    if !is_self_service_running() {
-        let app_name = crate::get_app_name();
-        let (_, _, _, exe) = get_install_info();
-        log::info!("Service is not running, checking if service exists: {}", app_name);
-
-        // Launch tray immediately so user sees it even while service is starting.
-        // The tray will retry its IPC connection until the service is ready.
-        if !crate::check_process("--tray", true) {
-            log::info!("Tray not running, launching tray process early");
-            hbb_common::allow_err!(crate::run_me(vec!["--tray"]));
-        }
-
-        // Check if the service is registered (no admin rights needed)
-        let service_exists = std::process::Command::new("sc")
-            .args(["query", &app_name])
-            .creation_flags(CREATE_NO_WINDOW)
-            .output()
-            .map(|o| o.status.success())
-            .unwrap_or(false);
-
-        if !service_exists {
-            // Service doesn't exist - create it first, then start.
-            // This handles the case where MSI custom action failed to register
-            // the service (e.g., on ARM64 Windows with x64 MSI).
-            log::info!("Service does not exist, creating and starting: {}", app_name);
-
-            // Wait for the Flutter window to appear before showing UAC.
-            // run_cmds is synchronous and shows a UAC prompt; if it fires immediately
-            // (before Flutter's waitUntilReadyToShow fires), the UAC steals focus and
-            // the main window appears to the user as if it never opened.
-            std::thread::sleep(std::time::Duration::from_secs(2));
-
-            let cmds = format!(
-                "sc create {app_name} binpath= \"\\\"{exe}\\\" --service\" start= auto DisplayName= \"{app_name} Service\"\nsc start {app_name}\n",
-                app_name = app_name,
-                exe = exe,
-            );
-            if let Err(e) = run_cmds(cmds, false, "create_start_service") {
-                log::error!("Failed to create/start service: {}", e);
-            } else {
-                // UAC completed. Bring the main window to front because the UAC secure
-                // desktop may have left focus on a different window.
-                log::info!("Service created. Bringing main window to front.");
-                std::thread::sleep(std::time::Duration::from_millis(500));
-                hbb_common::allow_err!(crate::run_me::<&str>(vec![]));
-            }
-        } else {
-            // Service exists but not running - just start it
-            log::info!("Service exists but not running, starting: {}", app_name);
-            match run_uac("sc", &format!("start {}", app_name)) {
-                Ok(true) => log::info!("Service start UAC request succeeded"),
-                Ok(false) => log::warn!("Service start UAC request was denied by user"),
-                Err(e) => log::error!("Service start UAC request failed: {}", e),
-            }
-        }
-    } else {
-        log::info!("Service is already running");
+    // Launch tray if not already running.
+    if !crate::check_process("--tray", true) {
+        log::info!("Tray not running, launching tray process");
+        hbb_common::allow_err!(crate::run_me(vec!["--tray"]));
     }
 }
 
