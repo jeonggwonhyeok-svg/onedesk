@@ -2845,18 +2845,23 @@ Future<Size> _adjustRestoreMainWindowSize(double? width, double? height,
     restoreHeight = defaultHeight;
   }
 
-  // Cap window size to 90% of the primary screen's logical dimensions.
-  // This prevents the window from being larger than the screen at any DPI scale.
+  // Cap window size based on screen logical dimensions so it fits at any DPI scale.
+  // min(fixed_max, max(fixed_min, screen * ratio))
+  //   100% DPI (1920×1040) → 800×600 (no change)
+  //   150% DPI (1280×680)  → ~768×510
+  //   200% DPI  (960×520)  → 700×500
   if (isDesktop || isWebDesktop) {
     final screenList = await window_size.getScreenList();
     if (screenList.isNotEmpty) {
       final screenW = screenList.first.visibleFrame.width;
       final screenH = screenList.first.visibleFrame.height;
-      if (screenW > 0 && restoreWidth > screenW * 0.9) {
-        restoreWidth = screenW * 0.9;
+      if (screenW > 0) {
+        final maxW = min(800.0, max(700.0, screenW * 0.60));
+        if (restoreWidth > maxW) restoreWidth = maxW;
       }
-      if (screenH > 0 && restoreHeight > screenH * 0.9) {
-        restoreHeight = screenH * 0.9;
+      if (screenH > 0) {
+        final maxH = min(600.0, max(500.0, screenH * 0.75));
+        if (restoreHeight > maxH) restoreHeight = maxH;
       }
     }
   }
@@ -2974,8 +2979,8 @@ Future<bool> restoreWindowPosition(WindowType type,
           if (screenList.isNotEmpty) {
             final screenW = screenList.first.visibleFrame.width;
             final screenH = screenList.first.visibleFrame.height;
-            final initW = min(800.0, screenW * 0.75);
-            final initH = min(600.0, screenH * 0.75);
+            final initW = min(800.0, max(700.0, screenW * 0.60));
+            final initH = min(600.0, max(500.0, screenH * 0.75));
             await windowManager.setSize(Size(initW, initH));
           }
           await windowManager.center();

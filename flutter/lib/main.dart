@@ -26,6 +26,7 @@ import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:get/get.dart';
 import 'package:provider/provider.dart';
 import 'package:window_manager/window_manager.dart';
+import 'package:window_size/window_size.dart' as window_size;
 
 import 'common.dart';
 import 'consts.dart';
@@ -171,16 +172,38 @@ void runMainApp(bool startService) async {
         bind.mainGetBuildinOption(key: "main-window-always-on-top") == 'Y';
   }
 
+  // Compute screen-aware window size and minimum size.
+  // At high DPI (150%, 200%), the logical screen shrinks so we cap accordingly.
+  double _initW = 800, _initH = 600;
+  double _minW = kMainWindowMinWidth, _minH = kMainWindowMinHeight;
+  if (isWindows || isLinux) {
+    final screens = await window_size.getScreenList();
+    if (screens.isNotEmpty) {
+      final sw = screens.first.visibleFrame.width;
+      final sh = screens.first.visibleFrame.height;
+      // Window: at most 60% of screen width / 75% of screen height, max 800x600
+      _initW = min(800.0, max(700.0, sw * 0.60));
+      _initH = min(600.0, max(500.0, sh * 0.75));
+      // Minimum size: cap to 55% / 65% of screen so it never exceeds the screen
+      _minW = min(kMainWindowMinWidth, max(600.0, sw * 0.55));
+      _minH = min(kMainWindowMinHeight, max(450.0, sh * 0.65));
+    }
+  }
+
   // Set window option.
   WindowOptions windowOptions = getHiddenTitleBarWindowOptions(
       isMainWindow: true,
-      minimumSize: const Size(kMainWindowMinWidth, kMainWindowMinHeight),
+      minimumSize: Size(_minW, _minH),
       alwaysOnTop: alwaysOnTop);
   windowManager.waitUntilReadyToShow(windowOptions, () async {
-    // 최소 창 크기 강제 설정
-    await windowManager.setMinimumSize(const Size(kMainWindowMinWidth, kMainWindowMinHeight));
+    await windowManager.setMinimumSize(Size(_minW, _minH));
     // Restore the location of the main window before window hide or show.
     await restoreWindowPosition(WindowType.Main);
+    // Override size after restore: ensure it fits the screen at any DPI scale
+    final curSize = await windowManager.getSize();
+    if (curSize.width > _initW * 1.1 || curSize.height > _initH * 1.1) {
+      await windowManager.setSize(Size(_initW, _initH));
+    }
     // Check the startup argument, if we successfully handle the argument, we keep the main window hidden.
     final handledByUniLinks = await initUniLinks();
     debugPrint("handled by uni links: $handledByUniLinks");
