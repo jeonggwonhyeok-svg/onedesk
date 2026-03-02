@@ -3109,6 +3109,13 @@ pub fn try_start_service_if_not_running() {
         let (_, _, _, exe) = get_install_info();
         log::info!("Service is not running, checking if service exists: {}", app_name);
 
+        // Launch tray immediately so user sees it even while service is starting.
+        // The tray will retry its IPC connection until the service is ready.
+        if !crate::check_process("--tray", true) {
+            log::info!("Tray not running, launching tray process early");
+            hbb_common::allow_err!(crate::run_me(vec!["--tray"]));
+        }
+
         // Check if the service is registered (no admin rights needed)
         let service_exists = std::process::Command::new("sc")
             .args(["query", &app_name])
@@ -3139,22 +3146,6 @@ pub fn try_start_service_if_not_running() {
                 Err(e) => log::error!("Service start UAC request failed: {}", e),
             }
         }
-
-        // Wait for the service to actually start, then launch the tray process.
-        // The tray check in core_main runs before this function, so when the service
-        // was stopped, the tray never gets started. We handle it here as a fallback.
-        for _ in 0..10 {
-            std::thread::sleep(Duration::from_secs(1));
-            if is_self_service_running() {
-                log::info!("Service is now running, checking tray process");
-                if !crate::check_process("--tray", true) {
-                    log::info!("Tray not running, launching tray process");
-                    hbb_common::allow_err!(crate::run_me(vec!["--tray"]));
-                }
-                return;
-            }
-        }
-        log::warn!("Service did not start within timeout");
     } else {
         log::info!("Service is already running");
     }
