@@ -3129,6 +3129,13 @@ pub fn try_start_service_if_not_running() {
             // This handles the case where MSI custom action failed to register
             // the service (e.g., on ARM64 Windows with x64 MSI).
             log::info!("Service does not exist, creating and starting: {}", app_name);
+
+            // Wait for the Flutter window to appear before showing UAC.
+            // run_cmds is synchronous and shows a UAC prompt; if it fires immediately
+            // (before Flutter's waitUntilReadyToShow fires), the UAC steals focus and
+            // the main window appears to the user as if it never opened.
+            std::thread::sleep(std::time::Duration::from_secs(2));
+
             let cmds = format!(
                 "sc create {app_name} binpath= \"\\\"{exe}\\\" --service\" start= auto DisplayName= \"{app_name} Service\"\nsc start {app_name}\n",
                 app_name = app_name,
@@ -3136,6 +3143,12 @@ pub fn try_start_service_if_not_running() {
             );
             if let Err(e) = run_cmds(cmds, false, "create_start_service") {
                 log::error!("Failed to create/start service: {}", e);
+            } else {
+                // UAC completed. Bring the main window to front because the UAC secure
+                // desktop may have left focus on a different window.
+                log::info!("Service created. Bringing main window to front.");
+                std::thread::sleep(std::time::Duration::from_millis(500));
+                hbb_common::allow_err!(crate::run_me::<&str>(vec![]));
             }
         } else {
             // Service exists but not running - just start it

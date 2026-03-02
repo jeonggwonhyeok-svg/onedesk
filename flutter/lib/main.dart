@@ -177,6 +177,14 @@ void runMainApp(bool startService) async {
       isMainWindow: true,
       alwaysOnTop: alwaysOnTop);
   windowManager.waitUntilReadyToShow(windowOptions, () async {
+    // Set minimum size in physical pixels regardless of DPI.
+    // setMinimumSize uses logical pixels internally (multiplied by DPR in C++),
+    // so divide by DPR to cancel it out → result is always kMainWindowMin* physical pixels.
+    final dpr = WidgetsBinding.instance.platformDispatcher.implicitView
+            ?.devicePixelRatio ??
+        1.0;
+    await windowManager.setMinimumSize(
+        Size(kMainWindowMinWidth / dpr, kMainWindowMinHeight / dpr));
     // restoreWindowPosition uses ignoreDevicePixelRatio: true internally,
     // so all sizes are in physical pixels — same visual size at any DPI.
     await restoreWindowPosition(WindowType.Main);
@@ -669,10 +677,12 @@ Widget _keepScaleBuilder(BuildContext context, Widget? child) {
     textScaler: TextScaler.linear(1.0),
   );
 
-  // On Windows/Linux, compensate for system DPI scaling (125%, 150% etc.)
-  // macOS Retina displays always report devicePixelRatio=2.0 regardless of
-  // display scaling settings, so DPI compensation is not applicable on macOS.
-  if ((Platform.isWindows || Platform.isLinux) && data.devicePixelRatio > 1.0) {
+  // On Windows, compensate for system DPI scaling (125%, 150% etc.)
+  // This maintains original physical pixels and text size regardless of DPI settings —
+  // equivalent to DPI-unaware mode in C#, but implemented at the Flutter layer for sharp rendering.
+  // macOS: always reports devicePixelRatio=2.0 for Retina, no compensation needed.
+  // Linux: each distro handles DPI differently; skip compensation here.
+  if (Platform.isWindows && data.devicePixelRatio > 1.0) {
     final dpr = data.devicePixelRatio;
     newData = newData.copyWith(
       devicePixelRatio: 1.0,
