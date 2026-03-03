@@ -563,9 +563,8 @@ jobs:
         uses: apple-actions/upload-testflight-build@v3
         with:
           app-path: flutter/build/ios/ipa/*.ipa
-          issuer-id: ${{ secrets.APPSTORE_CONNECT_ISSUER_ID }}
-          api-key-id: ${{ secrets.APPSTORE_CONNECT_KEY_ID }}
-          api-private-key: ${{ secrets.APPSTORE_CONNECT_PRIVATE_KEY }}
+          apple-id: ${{ secrets.APPLE_ID }}
+          app-password: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
 
 
   build-for-macOS:
