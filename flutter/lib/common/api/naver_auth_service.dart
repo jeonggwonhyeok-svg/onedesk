@@ -33,6 +33,7 @@ class NaverAuthService {
   static const Duration _timeout = Duration(seconds: 60);
 
   HttpServer? _server;
+  Completer<NaverAuthResult>? _completer;
   final String _baseUrl;
 
   NaverAuthService(this._baseUrl);
@@ -87,6 +88,7 @@ class NaverAuthService {
   /// 콜백 대기
   Future<NaverAuthResult> _waitForCallback() async {
     final completer = Completer<NaverAuthResult>();
+    _completer = completer;
 
     _server!.listen((request) async {
       final path = request.uri.path;
@@ -284,6 +286,10 @@ class NaverAuthService {
 
   /// 로그인 취소
   Future<void> cancel() async {
+    if (_completer != null && !_completer!.isCompleted) {
+      _completer!.complete(NaverAuthResult(success: false, error: 'cancelled'));
+      _completer = null;
+    }
     await _stopServer();
   }
 }

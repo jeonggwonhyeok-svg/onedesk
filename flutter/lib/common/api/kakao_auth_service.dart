@@ -33,6 +33,7 @@ class KakaoAuthService {
   static const Duration _timeout = Duration(seconds: 60);
 
   HttpServer? _server;
+  Completer<KakaoAuthResult>? _completer;
   final String _baseUrl;
 
   KakaoAuthService(this._baseUrl);
@@ -87,6 +88,7 @@ class KakaoAuthService {
   /// 콜백 대기
   Future<KakaoAuthResult> _waitForCallback() async {
     final completer = Completer<KakaoAuthResult>();
+    _completer = completer;
 
     _server!.listen((request) async {
       final path = request.uri.path;
@@ -284,6 +286,10 @@ class KakaoAuthService {
 
   /// 로그인 취소
   Future<void> cancel() async {
+    if (_completer != null && !_completer!.isCompleted) {
+      _completer!.complete(KakaoAuthResult(success: false, error: 'cancelled'));
+      _completer = null;
+    }
     await _stopServer();
   }
 }

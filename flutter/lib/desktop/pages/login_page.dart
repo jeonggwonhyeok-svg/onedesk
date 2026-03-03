@@ -120,6 +120,12 @@ class _LoginPageState extends State<LoginPage> {
                       if (isGoogleAuthServiceInitialized()) {
                         getGoogleAuthService().cancel();
                       }
+                      if (isNaverAuthServiceInitialized()) {
+                        getNaverAuthService().cancel();
+                      }
+                      if (isKakaoAuthServiceInitialized()) {
+                        getKakaoAuthService().cancel();
+                      }
                     },
                     style: ElevatedButton.styleFrom(
                       backgroundColor: primaryColor,
@@ -1045,6 +1051,12 @@ class _MobileIdLoginPageState extends State<_MobileIdLoginPage> {
                       // 진행 중인 OAuth 취소 (백그라운드 서버 정리)
                       if (isGoogleAuthServiceInitialized()) {
                         getGoogleAuthService().cancel();
+                      }
+                      if (isNaverAuthServiceInitialized()) {
+                        getNaverAuthService().cancel();
+                      }
+                      if (isKakaoAuthServiceInitialized()) {
+                        getKakaoAuthService().cancel();
                       }
                     },
                     style: ElevatedButton.styleFrom(
