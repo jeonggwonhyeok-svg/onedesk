@@ -183,6 +183,12 @@ fn make_tray() -> hbb_common::ResultType<()> {
                     // No UAC / cmd.exe elevation needed — the rendezvous mediator
                     // will stop registering once it reads the flag.
                     crate::ipc::set_option("stop-service", "Y");
+                    // Write quit flag file — Flutter polls for this and calls exit(0).
+                    let quit_flag = std::env::var("TEMP")
+                        .or_else(|_| std::env::var("TMP"))
+                        .unwrap_or_else(|_| "C:\\Users\\Public".to_string())
+                        + "\\onedesk_quit";
+                    let _ = std::fs::write(&quit_flag, "1");
                     *control_flow = ControlFlow::Exit;
                 }
                 #[cfg(not(any(target_os = "macos", target_os = "windows")))]

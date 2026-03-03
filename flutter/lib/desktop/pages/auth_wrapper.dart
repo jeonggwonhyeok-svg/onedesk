@@ -18,8 +18,16 @@ import '../../utils/multi_window_manager.dart';
 import './login_page.dart';
 import './desktop_tab_page.dart';
 
-/// 트레이 종료 시 사용하는 플래그 파일 경로
-const _kQuitFlagPath = '/tmp/onedesk_quit';
+/// 트레이 종료 시 사용하는 플래그 파일 경로 (플랫폼별)
+String get _kQuitFlagPath {
+  if (Platform.isWindows) {
+    final temp = Platform.environment['TEMP'] ??
+                 Platform.environment['TMP'] ??
+                 'C:\\Users\\Public';
+    return '$temp\\onedesk_quit';
+  }
+  return '/tmp/onedesk_quit';
+}
 
 /// 인증 상태에 따라 적절한 페이지를 표시하는 래퍼 위젯
 class AuthWrapper extends StatefulWidget {
@@ -40,8 +48,8 @@ class _AuthWrapperState extends State<AuthWrapper> with WindowListener {
     windowManager.addListener(this);
     // 시작 시 이전 종료 플래그 정리
     try { File(_kQuitFlagPath).deleteSync(); } catch (_) {}
-    // 트레이 종료 플래그를 주기적으로 확인
-    if (Platform.isMacOS) {
+    // 트레이 종료 플래그를 주기적으로 확인 (macOS, Windows)
+    if (Platform.isMacOS || Platform.isWindows) {
       _quitCheckTimer = Timer.periodic(const Duration(milliseconds: 500), (_) {
         if (File(_kQuitFlagPath).existsSync()) {
           try { File(_kQuitFlagPath).deleteSync(); } catch (_) {}
@@ -81,6 +89,8 @@ class _AuthWrapperState extends State<AuthWrapper> with WindowListener {
       // 로컬 데이터 정리
       await gFFI.userModel.reset(resetOther: true);
     }
+    // 원격창 등 서브 창 모두 닫기
+    try { await oneDeskWinManager.closeAllSubWindows(); } catch (_) {}
     exit(0);
   }
 

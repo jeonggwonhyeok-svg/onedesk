@@ -198,6 +198,12 @@ pub fn core_main() -> Option<Vec<String>> {
 
         #[cfg(windows)]
         {
+            // Clean up quit flag on startup.
+            let quit_flag = std::env::var("TEMP")
+                .or_else(|_| std::env::var("TMP"))
+                .unwrap_or_else(|_| "C:\\Users\\Public".to_string())
+                + "\\onedesk_quit";
+            let _ = std::fs::remove_file(&quit_flag);
             hbb_common::config::PeerConfig::preload_peers();
             // Auto-start Windows service if installed but not running
             std::thread::spawn(|| {
