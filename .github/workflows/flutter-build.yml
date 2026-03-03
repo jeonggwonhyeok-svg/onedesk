@@ -52,7 +52,7 @@ jobs:
     uses: ./.github/workflows/bridge.yml
 
   build-OneDeskTempTopMostWindow:
-    uses: ./.github/workflows/third-party-OneDeskTempTopMostWindow.yml
+    uses: ./.github/workflows/third-party-onedeskTempTopMostWindow.yml
     with:
       upload-artifact: ${{ inputs.upload-artifact }}
       target: windows-2022
