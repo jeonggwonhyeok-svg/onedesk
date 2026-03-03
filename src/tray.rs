@@ -177,7 +177,15 @@ fn make_tray() -> hbb_common::ResultType<()> {
                         .status();
                     *control_flow = ControlFlow::Exit;
                 }
-                #[cfg(not(target_os = "macos"))]
+                #[cfg(target_os = "windows")]
+                {
+                    // On Windows: just set the stop-service flag via IPC and exit.
+                    // No UAC / cmd.exe elevation needed — the rendezvous mediator
+                    // will stop registering once it reads the flag.
+                    crate::ipc::set_option("stop-service", "Y");
+                    *control_flow = ControlFlow::Exit;
+                }
+                #[cfg(not(any(target_os = "macos", target_os = "windows")))]
                 {
                     if !crate::platform::uninstall_service(false, true) {
                         *control_flow = ControlFlow::Exit;
