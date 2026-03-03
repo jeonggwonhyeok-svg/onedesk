@@ -204,6 +204,9 @@ pub fn core_main() -> Option<Vec<String>> {
                 .unwrap_or_else(|_| "C:\\Users\\Public".to_string())
                 + "\\onedesk_quit";
             let _ = std::fs::remove_file(&quit_flag);
+            // Always clear stop-service flag on startup so the rendezvous mediator connects.
+            // (try_start_service_if_not_running only clears it when installed)
+            hbb_common::config::Config::set_option("stop-service".into(), "".into());
             hbb_common::config::PeerConfig::preload_peers();
             // Auto-start Windows service if installed but not running
             std::thread::spawn(|| {
