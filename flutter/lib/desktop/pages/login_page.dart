@@ -116,6 +116,10 @@ class _LoginPageState extends State<LoginPage> {
                     onPressed: () {
                       _hideLoginLoadingDialog();
                       setState(() => _isInProgress = false);
+                      // 진행 중인 OAuth 취소 (백그라운드 서버 정리)
+                      if (isGoogleAuthServiceInitialized()) {
+                        getGoogleAuthService().cancel();
+                      }
                     },
                     style: ElevatedButton.styleFrom(
                       backgroundColor: primaryColor,
@@ -1038,6 +1042,10 @@ class _MobileIdLoginPageState extends State<_MobileIdLoginPage> {
                     onPressed: () {
                       _hideLoginLoadingDialog();
                       setState(() => _isInProgress = false);
+                      // 진행 중인 OAuth 취소 (백그라운드 서버 정리)
+                      if (isGoogleAuthServiceInitialized()) {
+                        getGoogleAuthService().cancel();
+                      }
                     },
                     style: ElevatedButton.styleFrom(
                       backgroundColor: primaryColor,

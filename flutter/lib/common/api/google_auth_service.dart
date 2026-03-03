@@ -33,6 +33,7 @@ class GoogleAuthService {
   static const Duration _timeout = Duration(seconds: 60);
 
   HttpServer? _server;
+  Completer<GoogleAuthResult>? _completer;
   final String _baseUrl;
 
   GoogleAuthService(this._baseUrl);
@@ -87,6 +88,7 @@ class GoogleAuthService {
   /// 콜백 대기
   Future<GoogleAuthResult> _waitForCallback() async {
     final completer = Completer<GoogleAuthResult>();
+    _completer = completer;
 
     _server!.listen((request) async {
       final path = request.uri.path;
@@ -284,6 +286,10 @@ class GoogleAuthService {
 
   /// 로그인 취소
   Future<void> cancel() async {
+    if (_completer != null && !_completer!.isCompleted) {
+      _completer!.complete(GoogleAuthResult(success: false, error: 'cancelled'));
+      _completer = null;
+    }
     await _stopServer();
   }
 }
